@@ -6,8 +6,8 @@ import Data.Aeson.Diff
 import Data.Aeson.Pointer
 import Control.Monad 
 import qualified Data.Text as T
-import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
+import qualified Data.Sequence as Seq
 import Data.ByteString.Lazy (ByteString)
 import Data.Dynamic
 import Data.Functor.Identity
@@ -275,3 +275,45 @@ instance (Typeable a, ToJSON a, FromJSON a, Eq a, JsonPatch a) =>
   deleteAt = deleteAtArr
   addAt = addAtArr
 
+instance (Ord a) => ArrayLike (Set.Set a) where
+  type ArrayVal (Set.Set a) = a
+  arrAppend st v = Set.insert v st
+  arrInsert _ v st = pure $ Set.insert v st
+  arrDelete i st
+    | i < 0 || i >= Set.size st =
+      Error "Index out of bounds"
+    | otherwise = pure (Set.elemAt i st,
+                        Set.deleteAt i st)
+  arrLens i f st
+    | i < 0 || i >= Set.size st =
+      Error "Index out of bounds"
+    | otherwise =
+        fmap (\v -> Set.insert v $ Set.deleteAt i st)
+        <$> f (Set.elemAt i st)
+
+instance (Ord a, Typeable a, ToJSON a, FromJSON a, Eq a, JsonPatch a) =>
+         JsonPatch (Set.Set a) where
+  patchOp = patchOpArr
+  valueAt = valueAtArr
+  encodeAt = encodeAtArr
+  deleteAt = deleteAtArr
+  addAt = addAtArr
+
+instance (Ord a) => ArrayLike (Seq.Seq a) where
+  type ArrayVal (Seq.Seq a) = a
+  arrAppend sq v = sq Seq.|> v
+  arrInsert i v sq = pure $ Seq.insertAt i v sq
+  arrDelete i sq = case Seq.lookup i sq of
+    Nothing -> Error "Index out of bounds"
+    Just v -> pure (v, Seq.deleteAt i sq)
+  arrLens i f sq  = case Seq.lookup i sq of
+    Nothing -> Error "Index out of bounds"
+    Just v -> fmap (\v2 -> Seq.update i v2 sq) <$> f v
+
+instance (Ord a, Typeable a, ToJSON a, FromJSON a, Eq a, JsonPatch a) =>
+         JsonPatch (Seq.Seq a) where
+  patchOp = patchOpArr
+  valueAt = valueAtArr
+  encodeAt = encodeAtArr
+  deleteAt = deleteAtArr
+  addAt = addAtArr
