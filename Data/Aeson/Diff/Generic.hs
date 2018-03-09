@@ -25,10 +25,10 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
            -> Result s
 
 setAtKey :: JsonPatch s => Key -> s -> r -> (forall v.JsonPatch v => r -> Result v) -> Result s
-setAtKey k s a f = fieldLens s k (\l -> l $ const $ f a)
-    
-updateAt :: JsonPatch s => Key -> s -> (forall v.JsonPatch v => v -> Result v) -> Result s
-updateAt k s f = fieldLens s k (\l -> l f)
+setAtKey k s a f = fieldLens s k $ \l -> l $ const $ f a
+
+updateAtKey :: JsonPatch s => Key -> s -> (forall v.JsonPatch v => v -> Result v) -> Result s
+updateAtKey k s f = fieldLens s k (\l -> l f)
   
 patch :: JsonPatch a => Patch -> a -> Result a
 patch = foldr (>=>) pure . map patchOp' . patchOperations
@@ -53,12 +53,15 @@ opError op = mconcat [
 getDynamic ::(Typeable a) => Dynamic -> Result a
 getDynamic = maybe (Error "type mismatch") pure . fromDynamic
 
+-- (Result . Const r) v
+
 getAtPointer :: JsonPatch s => Pointer -> s -> (forall v.JsonPatch v => v -> r) -> Result r
 getAtPointer (Pointer []) s f = pure $ f s
-getAtPointer (Pointer (key:path)) s f = 
+getAtPointer (Pointer (key:path)) s f =
   fieldLens s key $ \l ->
-    getAtPointer (Pointer path) (getConst $ l Const) f
-
+    fmap getConst $ getCompose $
+    l (\v -> Compose $ Const <$> getAtPointer (Pointer path) v f)
+    
 getDynAtPointer :: JsonPatch s => Pointer -> s -> Result Dynamic
 getDynAtPointer p s = getAtPointer p s toDyn
 
@@ -79,21 +82,21 @@ addAtPointer (Pointer []) _ v f = f v
 addAtPointer (Pointer [key]) s val f =
   insertAt key s val f
 addAtPointer (Pointer (key:path)) s val f =
-  updateAt key s (\v -> addAtPointer (Pointer path) v val f)
+  updateAtKey key s (\v -> addAtPointer (Pointer path) v val f)
 
 copyPath :: JsonPatch s => Pointer -> Pointer -> s -> Result s
 copyPath (Pointer (fromKey: fromPath)) (Pointer (toKey: toPath)) s
   | fromKey == toKey =
-    updateAt toKey s $
+    updateAtKey toKey s $
     copyPath (Pointer fromPath) (Pointer toPath)
 copyPath from to_ s = do
-  v <- fst <$> deleteAtPointer from s toDyn
+  v <- getAtPointer from s toDyn
   addAtPointer to_ s v getDynamic
 
 movePath :: JsonPatch s => Pointer -> Pointer -> s -> Result s
 movePath (Pointer (fromKey: fromPath)) (Pointer (toKey: toPath)) s
   | fromKey == toKey =
-    updateAt toKey s $
+    updateAtKey toKey s $
     movePath (Pointer fromPath) (Pointer toPath)
 movePath (Pointer []) (Pointer []) s = pure s
 movePath (Pointer []) _ _ = Error "cannot move to child"
@@ -107,7 +110,7 @@ replaceAtPath (Pointer []) _ v f = f v
 replaceAtPath (Pointer [key]) s val f =
   setAtKey key s val f
 replaceAtPath (Pointer (key:path)) s val f =
-  updateAt key s (\v -> replaceAtPath (Pointer path) v val f)
+  updateAtKey key s (\v -> replaceAtPath (Pointer path) v val f)
 
 testAtPath :: JsonPatch s => Pointer -> s -> r ->
               (forall v.JsonPatch v => r -> Result v) -> Result s
@@ -116,7 +119,7 @@ testAtPath (Pointer []) s r f = do
   if v == s then pure s
     else Error "Test failed"
 testAtPath (Pointer (key:path)) s val f = do
-  _ <- updateAt key s $ \v ->
+  _ <- updateAtKey key s $ \v ->
     testAtPath (Pointer path) v val f
   pure s
 
@@ -138,11 +141,6 @@ strKey (AKey i) = show i
 
 isEndKey :: Key -> Bool
 isEndKey = (== OKey "-")
-
-
--- With RankN types (CPS style):
--- type AnyLensCps a o = (forall v. (ToJSON v, FromJSON v, Typeable v) => (Lens' a v) -> Result o) -> Result o
--- type ArrayLikeLensCps a = String -> (forall r. (AnyLensCps a r -> r) -> Maybe r)
 
 splitList :: Int -> [a] -> Maybe ([a], [a])
 splitList i _ | i < 0 = Nothing
