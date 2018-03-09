@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes, TypeFamilies, FlexibleContexts, ExistentialQuantification #-}
 module Data.Aeson.Diff.Generic where
 import Data.Aeson
 import Data.Aeson.Patch
@@ -10,15 +10,25 @@ import qualified Data.Set as Set
 import qualified Data.Sequence as Seq
 import Data.ByteString.Lazy (ByteString)
 import Data.Dynamic
-import Data.Functor.Identity
-import Data.Functor.Const
 
-class JsonPatch a where
-  patchOp :: Operation -> a -> Result a
-  valueAt :: Pointer -> a -> Result Value
-  encodeAt :: Pointer -> a -> Result ByteString
-  deleteAt :: Pointer -> a -> Result (Dynamic, a)
-  addAt :: Pointer -> Dynamic -> a -> Result a
+import Data.Functor.Const
+import Data.Functor.Compose
+
+type FieldLens s v = forall f.Functor f => (v -> f v) -> f s
+type LensConsumer s r = forall v. (JsonPatch v) => FieldLens s v -> Result r
+
+class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
+  fieldLens :: s -> Key -> LensConsumer s r -> Result r
+  deleteAt :: Key -> s -> (forall v.(JsonPatch v) => v -> r)
+           -> Result (r, s)
+  insertAt :: Key -> s -> r -> (forall v.(JsonPatch v) => r -> Result v)
+           -> Result s
+
+setAtKey :: JsonPatch s => Key -> s -> r -> (forall v.JsonPatch v => r -> Result v) -> Result s
+setAtKey k s a f = fieldLens s k (\l -> l $ const $ f a)
+    
+updateAt :: JsonPatch s => Key -> s -> (forall v.JsonPatch v => v -> Result v) -> Result s
+updateAt k s f = fieldLens s k (\l -> l f)
   
 patch :: JsonPatch a => Patch -> a -> Result a
 patch = foldr (>=>) pure . map patchOp' . patchOperations
@@ -39,7 +49,85 @@ opError op = mconcat [
         opname (Rem _) = "Remove"
         opname (Rep _ _) = "Replace"
         opname (Tst _ _) = "Test"
-        
+
+getDynamic ::(Typeable a) => Dynamic -> Result a
+getDynamic = maybe (Error "type mismatch") pure . fromDynamic
+
+getAtPointer :: JsonPatch s => Pointer -> s -> (forall v.JsonPatch v => v -> r) -> Result r
+getAtPointer (Pointer []) s f = pure $ f s
+getAtPointer (Pointer (key:path)) s f = 
+  fieldLens s key $ \l ->
+    getAtPointer (Pointer path) (getConst $ l Const) f
+
+getDynAtPointer :: JsonPatch s => Pointer -> s -> Result Dynamic
+getDynAtPointer p s = getAtPointer p s toDyn
+
+getValueAtPointer :: JsonPatch s => Pointer -> s -> Result Value
+getValueAtPointer p s = getAtPointer p s toJSON
+  
+deleteAtPointer :: JsonPatch s => Pointer -> s ->
+                (forall v.JsonPatch v => v -> r) -> Result (r, s)
+deleteAtPointer (Pointer []) _ _ = Error "Invalid pointer"
+deleteAtPointer (Pointer [key]) s f = deleteAt key s f
+deleteAtPointer (Pointer (key:path)) s f = 
+  fieldLens s key $ \l ->
+    getCompose $ l (\v -> Compose $ deleteAtPointer (Pointer path) v f)
+
+addAtPointer :: JsonPatch s => Pointer -> s -> r ->
+             (forall v.JsonPatch v => r -> Result v) -> Result s
+addAtPointer (Pointer []) _ v f = f v
+addAtPointer (Pointer [key]) s val f =
+  insertAt key s val f
+addAtPointer (Pointer (key:path)) s val f =
+  updateAt key s (\v -> addAtPointer (Pointer path) v val f)
+
+copyPath :: JsonPatch s => Pointer -> Pointer -> s -> Result s
+copyPath (Pointer (fromKey: fromPath)) (Pointer (toKey: toPath)) s
+  | fromKey == toKey =
+    updateAt toKey s $
+    copyPath (Pointer fromPath) (Pointer toPath)
+copyPath from to_ s = do
+  v <- fst <$> deleteAtPointer from s toDyn
+  addAtPointer to_ s v getDynamic
+
+movePath :: JsonPatch s => Pointer -> Pointer -> s -> Result s
+movePath (Pointer (fromKey: fromPath)) (Pointer (toKey: toPath)) s
+  | fromKey == toKey =
+    updateAt toKey s $
+    movePath (Pointer fromPath) (Pointer toPath)
+movePath (Pointer []) (Pointer []) s = pure s
+movePath (Pointer []) _ _ = Error "cannot move to child"
+movePath from to_ s = do
+  (v, s') <- deleteAtPointer from s toDyn
+  addAtPointer to_ s' v getDynamic
+
+replaceAtPath :: JsonPatch s => Pointer -> s -> r ->
+             (forall v.JsonPatch v => r -> Result v) -> Result s
+replaceAtPath (Pointer []) _ v f = f v
+replaceAtPath (Pointer [key]) s val f =
+  setAtKey key s val f
+replaceAtPath (Pointer (key:path)) s val f =
+  updateAt key s (\v -> replaceAtPath (Pointer path) v val f)
+
+testAtPath :: JsonPatch s => Pointer -> s -> r ->
+              (forall v.JsonPatch v => r -> Result v) -> Result s
+testAtPath (Pointer []) s r f = do
+  v <- f r
+  if v == s then pure s
+    else Error "Test failed"
+testAtPath (Pointer (key:path)) s val f = do
+  _ <- updateAt key s $ \v ->
+    testAtPath (Pointer path) v val f
+  pure s
+
+patchOp :: JsonPatch a => Operation -> a -> Result a
+patchOp (Add ptr val) s = addAtPointer ptr s val fromJSON
+patchOp (Rem ptr) s = snd <$> deleteAtPointer ptr s (const ())
+patchOp (Cpy toPath fromPath) s = copyPath fromPath toPath s
+patchOp (Mov toPath fromPath) s = movePath fromPath toPath s
+patchOp (Rep ptr val) s = replaceAtPath ptr s val fromJSON
+patchOp (Tst ptr val) s = testAtPath ptr s val fromJSON
+            
 intKey :: Key -> Result Int
 intKey (OKey _) = Error "expected Array Key."
 intKey (AKey i) = pure i
@@ -51,194 +139,10 @@ strKey (AKey i) = show i
 isEndKey :: Key -> Bool
 isEndKey = (== OKey "-")
 
-class ArrayLike a where
-  type ArrayVal a :: *
-  arrAppend :: a -> ArrayVal a -> a
-  arrInsert :: Int -> ArrayVal a -> a -> Result a
-  arrDelete :: Int -> a -> Result (ArrayVal a, a)
-  arrLens :: Functor f => Int -> (ArrayVal a -> Result (f (ArrayVal a)))
-             -> (a -> Result (f a))
 
-arrGet :: (ArrayLike a) =>  Int -> a -> Result (ArrayVal a)
-arrGet i = fmap getConst . arrLens i (pure . Const)
-
-arrUpdate :: (ArrayLike a) =>  Int -> (ArrayVal a -> Result (ArrayVal a)) -> a -> Result a
-arrUpdate i f =
-  fmap runIdentity . arrLens i (fmap Identity . f)
-
-arrPut :: (ArrayLike a) => Int -> Result (ArrayVal a) -> a -> Result a
-arrPut i = arrUpdate i . const
-
-class ObjectLike a where
-  type ObjectVal a :: *
-  objInsert :: String -> v -> a -> Result a
-  objDelete :: String -> a -> Result (ObjectVal a, a)
-  objLens :: String -> (ObjectVal a -> Result (f (ObjectVal a)))
-          -> (a -> Result (f a))
-
-objGet :: (ObjectLike a) =>  String -> a -> Result (ObjectVal a)
-objGet k = fmap getConst . objLens k (pure . Const)
-
-objUpdate :: (ObjectLike a) =>  String -> (ObjectVal a -> Result (ObjectVal a)) -> a -> Result a
-objUpdate s f =
-  fmap runIdentity .
-  objLens s (fmap Identity . f)
-
-objPut :: (ObjectLike a) => String -> Result (ObjectVal a) -> a -> Result a
-objPut s = objUpdate s . const
-
-invalidPointer :: Result a
-invalidPointer = Error "invalid pointer."
-
-getDynamic ::(Typeable a) => Dynamic -> Result a
-getDynamic = maybe (Error "type mismatch") pure . fromDynamic
-                 
-patchOpArr :: (Typeable (ArrayVal a), Eq (ArrayVal a),
-               ToJSON (ArrayVal a), FromJSON (ArrayVal a),
-               ToJSON a, FromJSON a,  Eq a, ArrayLike a,
-               JsonPatch (ArrayVal a), Typeable a)
-           => Operation -> a -> Result a
-patchOpArr op arr = case pointerPath $ changePointer op of
-  [] -> case op of
-    (Add _ val) -> fromJSON val
-    (Rem _) -> Error "illegal operation"
-    (Rep _ val) -> fromJSON val
-    (Cpy _ fromPath) -> 
-      getDynamic =<< fst <$> deleteAtArr fromPath arr
-    (Mov _ fromPath) -> 
-      getDynamic =<< fst <$> deleteAtArr fromPath arr
-    (Tst _ val) -> do
-      v <- fromJSON val
-      when (v /= arr) $
-        Error "Test failed"
-      return arr
-  [key] -> case op of
-    (Add _ val) -> do
-      v <- fromJSON val
-      if isEndKey key
-        then pure $ arrAppend arr v
-        else do i <- intKey key
-                arrInsert i v arr
-    (Rem _) -> do
-      i <- intKey key
-      snd <$> arrDelete i arr
-    (Rep _ val) -> do
-      i <- intKey key
-      arrPut i (fromJSON val) arr
-    (Cpy _ (Pointer [fromKey])) -> do
-      frm <- intKey fromKey
-      v <- arrGet frm arr
-      if isEndKey key
-        then pure $ arrAppend arr v
-        else do to_ <- intKey key
-                arrInsert to_ v arr
-    (Cpy _ (Pointer (fromKey:fromPath))) -> do
-      frm <- intKey fromKey
-      v <- arrGet frm arr
-      innerDyn <- fst <$> deleteAt (Pointer fromPath) v
-      -- don't actually delete anything
-      case fromDynamic innerDyn of
-        Nothing -> Error "type error"
-        Just inner
-          | isEndKey key -> pure $ arrAppend arr inner
-          | otherwise -> do
-              to_ <- intKey key
-              arrInsert to_ inner arr
-    (Cpy _ _) -> invalidPointer
-    (Mov _ (Pointer [fromKey])) -> do
-      frm <- intKey fromKey
-      (v, arr2) <- arrDelete frm arr
-      if isEndKey key
-        then pure $ arrAppend arr v
-        else do to_ <- intKey key
-                arrInsert to_ v arr2
-    (Mov _ (Pointer (fromKey:fromPath))) -> do
-      frm <- intKey fromKey
-      v <- arrGet frm arr
-      (innerDyn, v') <- deleteAt (Pointer fromPath) v
-      arr' <- arrPut frm (pure v') arr
-      case fromDynamic innerDyn of
-        Nothing -> Error "type mismatch"
-        Just inner
-          | isEndKey key -> pure $ arrAppend arr' inner
-          | otherwise -> do
-              to_ <- intKey key
-              arrInsert to_ inner arr'
-    (Mov _ _) -> invalidPointer
-    (Tst _ val) -> do
-      v <- fromJSON val
-      i <- intKey key
-      v2 <- arrGet i arr
-      when (v /= v2) $
-        Error "Test failed"
-      return arr
-  (key:nextPath) -> case op of
-    (Cpy _ (Pointer (fromKey:fromPath)))
-      | fromKey == key -> do
-          i <- intKey key 
-          arrUpdate i (patchOp (Cpy (Pointer nextPath)
-                                (Pointer fromPath))) arr
-    (Cpy _ fromPath) -> do
-      innerDyn <- fst <$> deleteAtArr fromPath arr
-      addAtArr (changePointer op) innerDyn arr
-      
-    (Mov _ (Pointer (fromKey:fromPath)))
-      | fromKey == key -> do
-          i <- intKey key 
-          arrUpdate i (patchOp (Mov (Pointer nextPath)
-                                (Pointer fromPath))) arr
-    (Mov _ (Pointer [])) -> Error "cannot move to child."
-    (Mov _ fromPath) -> do
-      (innerDyn, arr') <- deleteAtArr fromPath arr
-      addAtArr (changePointer op) innerDyn arr'
-
-    (Tst _ val) -> do
-      i <- intKey key
-      _ <- patchOp (Tst (Pointer nextPath) val) =<< arrGet i arr
-      pure arr
-    _ -> do
-      i <- intKey key
-      arrUpdate i (patchOp op{changePointer = Pointer nextPath}) arr
-            
-
-valueAtArr :: (JsonPatch (ArrayVal a), ToJSON (ArrayVal a), ArrayLike a) => Pointer -> a -> Result Value
-valueAtArr (Pointer [AKey i]) arr = toJSON <$> arrGet i arr
-valueAtArr (Pointer (AKey i:keys)) arr = do
-  v <- arrGet i arr
-  valueAt (Pointer keys) v
-valueAtArr _ _ = Error "invalid pointer"
-
-encodeAtArr :: (JsonPatch (ArrayVal a), ToJSON (ArrayVal a), ArrayLike a)
-            => Pointer -> a -> Result ByteString
-encodeAtArr (Pointer [AKey i]) arr = encode <$> arrGet i arr
-encodeAtArr (Pointer (AKey i:keys)) arr = do
-  v <- arrGet i arr
-  encodeAt (Pointer keys) v
-encodeAtArr _ _ = Error "invalid pointer"
-
-deleteAtArr :: (JsonPatch (ArrayVal a), ToJSON (ArrayVal a), ArrayLike a, Typeable (ArrayVal a))
-            => Pointer -> a -> Result (Dynamic, a)
-deleteAtArr (Pointer [AKey i]) arr = do
-  (v, arr2) <- arrDelete i arr
-  return (toDyn v, arr2)
-deleteAtArr (Pointer (AKey i:keys)) arr = 
-  arrLens i (deleteAt (Pointer keys)) arr
-deleteAtArr _ _ =
-  Error "Invalid pointer"
-
-addAtArr :: (Typeable a, JsonPatch (ArrayVal a), ToJSON (ArrayVal a),
-             ArrayLike a, Typeable (ArrayVal a))
-            => Pointer -> Dynamic -> a -> Result a
-addAtArr (Pointer []) dyn _ = getDynamic dyn
-addAtArr (Pointer [OKey "-"]) dyn arr = 
-  arrAppend arr <$> getDynamic dyn
-addAtArr (Pointer [AKey i]) dyn arr = do
-  v <- getDynamic dyn
-  arrInsert i v arr
-addAtArr (Pointer (AKey i:keys)) dyn arr = 
-  arrUpdate i (addAt (Pointer keys) dyn) arr
-addAtArr _ _ _ =
-  Error "Invalid pointer"
+-- With RankN types (CPS style):
+-- type AnyLensCps a o = (forall v. (ToJSON v, FromJSON v, Typeable v) => (Lens' a v) -> Result o) -> Result o
+-- type ArrayLikeLensCps a = String -> (forall r. (AnyLensCps a r -> r) -> Maybe r)
 
 splitList :: Int -> [a] -> Maybe ([a], [a])
 splitList i _ | i < 0 = Nothing
@@ -248,72 +152,69 @@ splitList n (x:xs) = do
   (l, r) <- splitList (n-1) xs
   pure (x:l, r)
 
-instance ArrayLike [a] where
-  type ArrayVal [a] = a
-  arrAppend a v = a ++ [v]
-  arrInsert i v lst =
-    case splitList i lst of
-      Just (l, r) -> pure $ l ++ v:r
-      Nothing -> Error "Index out of bounds"
-  arrDelete i lst =
-    case splitList i lst of
-      Just (l, r1:rs) -> pure (r1, l ++ rs)
-      _ -> Error "Index out of bounds"
-  arrLens i f lst =
+instance JsonPatch a => JsonPatch [a] where
+  fieldLens lst key cont = do
+    i <- intKey key
     case splitList i lst of
       Just (l, r1:rs) ->
-        fmap (\v -> l ++ v:rs) <$> f r1
+        cont $ \f -> (\v -> l ++ v:rs) <$> f r1
       _ -> Error "Index out of bounds"
 
--- declareArrayLikePatch ''[a]
+  insertAt key lst v f
+    | isEndKey key = (lst ++) <$> f v
+    | otherwise = do
+        i <- intKey key
+        case splitList i lst of
+          Just (l, r) -> (\v' -> l ++ v':r) <$> f v
+          Nothing -> Error "Index out of bounds"
 
-instance (Typeable a, ToJSON a, FromJSON a, Eq a, JsonPatch a) =>
-         JsonPatch [a] where
-  patchOp = patchOpArr
-  valueAt = valueAtArr
-  encodeAt = encodeAtArr
-  deleteAt = deleteAtArr
-  addAt = addAtArr
+  deleteAt key lst f = do
+    i <- intKey key
+    case splitList i lst of
+      Just (l, r1:rs) -> pure (f r1, l ++ rs)
+      _ -> Error "Index out of bounds"
 
-instance (Ord a) => ArrayLike (Set.Set a) where
-  type ArrayVal (Set.Set a) = a
-  arrAppend st v = Set.insert v st
-  arrInsert _ v st = pure $ Set.insert v st
-  arrDelete i st
-    | i < 0 || i >= Set.size st =
+
+instance (Ord a, JsonPatch a) => JsonPatch (Set.Set a) where
+  fieldLens st key cont = do
+    i <- intKey key
+    when (i < 0 || i >= Set.size st) $
       Error "Index out of bounds"
-    | otherwise = pure (Set.elemAt i st,
-                        Set.deleteAt i st)
-  arrLens i f st
-    | i < 0 || i >= Set.size st =
+    cont $ \f -> (\v -> Set.insert v $ Set.deleteAt i st)
+                 <$> f (Set.elemAt i st)
+    
+  insertAt key st v f
+    | isEndKey key =
+        (`Set.insert` st) <$> f v
+    | otherwise = do
+        i <- intKey key
+        when (i < 0 || i >= Set.size st) $
+          Error "Index out of bounds"
+        (`Set.insert` st) <$> f v
+
+  deleteAt key st f = do
+    i <- intKey key
+    when (i < 0 || i >= Set.size st) $
       Error "Index out of bounds"
-    | otherwise =
-        fmap (\v -> Set.insert v $ Set.deleteAt i st)
-        <$> f (Set.elemAt i st)
+    pure (f $ Set.elemAt i st, Set.deleteAt i st)
 
-instance (Ord a, Typeable a, ToJSON a, FromJSON a, Eq a, JsonPatch a) =>
-         JsonPatch (Set.Set a) where
-  patchOp = patchOpArr
-  valueAt = valueAtArr
-  encodeAt = encodeAtArr
-  deleteAt = deleteAtArr
-  addAt = addAtArr
+instance (Ord a, JsonPatch a) => JsonPatch (Seq.Seq a) where
+  fieldLens sq key cont = do
+    i <- intKey key
+    case Seq.lookup i sq of
+      Nothing -> Error "Index out of bounds"
+      Just v ->
+        cont $ \f ->
+        (\v' -> Seq.update i v' sq) <$> f v
 
-instance (Ord a) => ArrayLike (Seq.Seq a) where
-  type ArrayVal (Seq.Seq a) = a
-  arrAppend sq v = sq Seq.|> v
-  arrInsert i v sq = pure $ Seq.insertAt i v sq
-  arrDelete i sq = case Seq.lookup i sq of
-    Nothing -> Error "Index out of bounds"
-    Just v -> pure (v, Seq.deleteAt i sq)
-  arrLens i f sq  = case Seq.lookup i sq of
-    Nothing -> Error "Index out of bounds"
-    Just v -> fmap (\v2 -> Seq.update i v2 sq) <$> f v
+  insertAt key sq v f
+    | isEndKey key = (sq Seq.|>) <$> f v
+    | otherwise = do
+        i <- intKey key
+        (\v'-> Seq.insertAt i v' sq) <$> f v
 
-instance (Ord a, Typeable a, ToJSON a, FromJSON a, Eq a, JsonPatch a) =>
-         JsonPatch (Seq.Seq a) where
-  patchOp = patchOpArr
-  valueAt = valueAtArr
-  encodeAt = encodeAtArr
-  deleteAt = deleteAtArr
-  addAt = addAtArr
+  deleteAt key sq f = do
+    i <- intKey key
+    case Seq.lookup i sq of
+      Nothing -> Error "Index out of bounds"
+      Just v -> pure (f v, Seq.deleteAt i sq)
