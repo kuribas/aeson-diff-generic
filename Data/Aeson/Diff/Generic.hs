@@ -18,8 +18,7 @@ import qualified Data.Vector.Unboxed as UVector
 import qualified Data.Vector as Vector
 import qualified Data.Vector.Storable as SVector
 import qualified Data.Vector.Primitive as PVector
-import qualified Data.HashMap.Lazy as LHashMap
-import qualified Data.HashMap.Strict as SHashMap
+import qualified Data.HashMap.Lazy as HashMap
 import qualified Data.HashSet as HashSet
 import qualified Data.Map as Map
 import Data.Word
@@ -59,10 +58,10 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
   insertAt _ _ _ _ = Error "Illegal operation"
 
 patch :: JsonPatch a => Patch -> a -> Result a
-patch = foldr (>=>) pure . map patchOp' . patchOperations
+patch = foldr (>=>) pure . map patchOp . patchOperations
 
-patchOp' :: JsonPatch a => Operation -> a -> Result a
-patchOp' op v = case patchOp op v of
+patchOp :: JsonPatch a => Operation -> a -> Result a
+patchOp op v = case patchOp' op v of
   Error msg -> Error $ opError op ++ msg
   Success ret -> Success ret
 
@@ -74,7 +73,7 @@ opError op = mconcat [
   where opname (Add _ _) = "Add"
         opname (Cpy _ _) = "Copy"
         opname (Mov _ _) = "Move"
-        opname (Rem _) = "Remove"
+        opname (Rem _)   = "Remove"
         opname (Rep _ _) = "Replace"
         opname (Tst _ _) = "Test"
 
@@ -158,13 +157,13 @@ testAtPointer (Pointer (key:path)) s val f = do
     testAtPointer (Pointer path) v val f
   pure s
 
-patchOp :: JsonPatch a => Operation -> a -> Result a
-patchOp (Add ptr val) s = addAtPointer ptr s val fromJSON
-patchOp (Rem ptr) s = snd <$> deleteAtPointer ptr s (const ())
-patchOp (Cpy toPath fromPath) s = copyPath fromPath toPath s
-patchOp (Mov toPath fromPath) s = movePath fromPath toPath s
-patchOp (Rep ptr val) s = replaceAtPointer ptr s val fromJSON
-patchOp (Tst ptr val) s = testAtPointer ptr s val fromJSON
+patchOp' :: JsonPatch a => Operation -> a -> Result a
+patchOp' (Add ptr val) s = addAtPointer ptr s val fromJSON
+patchOp' (Rem ptr) s = snd <$> deleteAtPointer ptr s (const ())
+patchOp' (Cpy toPath fromPath) s = copyPath fromPath toPath s
+patchOp' (Mov toPath fromPath) s = movePath fromPath toPath s
+patchOp' (Rep ptr val) s = replaceAtPointer ptr s val fromJSON
+patchOp' (Tst ptr val) s = testAtPointer ptr s val fromJSON
             
 intKey :: Key -> Result Int
 intKey (OKey _) = Error "expected Array Key."
@@ -179,7 +178,7 @@ isEndKey = (== OKey "-")
 
 newtypeFieldLens :: (JsonPatch u, JsonPatch w) => (u -> w) -> (w -> u)
                  -> w -> Key -> LensConsumer w r -> Result r
-newtypeFieldLens wrap unwrap el key cont = do
+newtypeFieldLens wrap unwrap el key cont = 
   fieldLens (unwrap el) key $ \l -> cont $ fmap wrap . l
 {-# INLINE newtypeFieldLens #-}
   
@@ -280,8 +279,6 @@ instance (Typeable a, JsonPatch b) => JsonPatch (Tagged a b) where
   insertAt = newtypeInsertAt Tagged unTagged
   deleteAt = newtypeDeleteAt Tagged unTagged
   
-
-
 instance (JsonPatch a, JsonPatch b) => JsonPatch (Either a b)
 instance JsonPatch a => JsonPatch (Data.List.NonEmpty.NonEmpty a)
 instance JsonPatch a => JsonPatch (Maybe a)
@@ -494,20 +491,21 @@ getHashMapKey key =
   maybe (Error "Invalid path") pure =<<
   getMapKey (T.pack $ strKey key) 
 
-instance (ToJSONKey k, Typeable k, Eq k, Hashable k, FromJSONKey k, JsonPatch a) => JsonPatch (LHashMap.HashMap k a) where
+instance (ToJSONKey k, Typeable k, Eq k, Hashable k, FromJSONKey k, JsonPatch a)
+         => JsonPatch (HashMap.HashMap k a) where
   fieldLens hm key cont = do
     k <- getHashMapKey key
-    case LHashMap.lookup k hm of
-      Nothing -> Error "key not found"
+    case HashMap.lookup k hm of
+      Nothing -> Error "Invalid Pointer"
       Just val ->
-        cont $ \f -> (\v -> LHashMap.insert k v hm) <$> f val
+        cont $ \f -> (\v -> HashMap.insert k v hm) <$> f val
 
   insertAt key hm v f = do
     k <- getHashMapKey key
-    (\v' -> LHashMap.insert k v' hm) <$> f v
+    (\v' -> HashMap.insert k v' hm) <$> f v
   deleteAt key hm f = do
     k <- getHashMapKey key
-    case LHashMap.lookup k hm of
-      Nothing -> Error "key not found"
-      Just val -> pure (f val, LHashMap.delete k hm)
+    case HashMap.lookup k hm of
+      Nothing -> Error "Invalid Pointer"
+      Just val -> pure (f val, HashMap.delete k hm)
 
