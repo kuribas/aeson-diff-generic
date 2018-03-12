@@ -1,6 +1,7 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, StandaloneDeriving, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts #-}
 module Data.Aeson.Diff.Generic where
 import Data.Aeson
+import Data.Aeson.Types
 import Data.Aeson.Patch
 import Data.Aeson.Diff
 import Data.Aeson.Pointer
@@ -40,6 +41,7 @@ import qualified Data.DList
 import Data.Hashable
 import Data.Proxy
 import Data.Tagged
+import Unsafe.Coerce
 
 type FieldLens s v = forall f.Functor f => (v -> f v) -> f s
 type LensConsumer s r = forall v. (JsonPatch v) => FieldLens s v -> Result r
@@ -480,27 +482,32 @@ instance (PVector.Prim a, JsonPatch a) => JsonPatch (PVector.Vector a) where
     let (l, r) = PVector.splitAt i vec
     pure (f $ PVector.head r, l PVector.++ PVector.tail r)
 
-getHashMapKey s = case fromJSONKey of
-  FromJSONKeyCoerce coerce -> _                 -- !(CoerceText a)	-> _
-  FromJSONKeyText fromText -> pure $ fromText $ T.pack s          -- !(Text -> a) -> _
-  FromJSONKeyTextParser parse -> _              --  !(Text -> Parser a)	-> _
-  FromJSONKeyValue _ -> Error "Invalid path"
+getMapKey :: FromJSONKey a => T.Text -> Result (Maybe a)
+getMapKey s = case fromJSONKey of
+  FromJSONKeyCoerce _ -> pure $ Just $ unsafeCoerce s
+  FromJSONKeyText fromTxt -> pure $ Just $ fromTxt  s
+  FromJSONKeyTextParser parser -> Just <$> parse parser s
+  FromJSONKeyValue _ -> pure Nothing
 
-instance (FromJSONKey k, JsonPatch a) => JsonPatch (LHashMap.HashMap k a) where
+getHashMapKey :: FromJSONKey a => Key -> Result a
+getHashMapKey key =
+  maybe (Error "Invalid path") pure =<<
+  getMapKey (T.pack $ strKey key) 
+
+instance (ToJSONKey k, Typeable k, Eq k, Hashable k, FromJSONKey k, JsonPatch a) => JsonPatch (LHashMap.HashMap k a) where
   fieldLens hm key cont = do
-    let s = strKey key
-    k <- _
-
+    k <- getHashMapKey key
     case LHashMap.lookup k hm of
       Nothing -> Error "key not found"
       Just val ->
         cont $ \f -> (\v -> LHashMap.insert k v hm) <$> f val
-      _ -> Error "Index out of bounds"
 
-  insertAt key hm v f = (\v -> LHashMap.insert (_ key) v hm) <$> f v
-  deleteAt key lst f = do
-    i <- intKey key
-    case splitList i lst of
-      Just (l, r1:rs) -> pure (f r1, l ++ rs)
-      _ -> Error "Index out of bounds"
+  insertAt key hm v f = do
+    k <- getHashMapKey key
+    (\v' -> LHashMap.insert k v' hm) <$> f v
+  deleteAt key hm f = do
+    k <- getHashMapKey key
+    case LHashMap.lookup k hm of
+      Nothing -> Error "key not found"
+      Just val -> pure (f val, LHashMap.delete k hm)
 
