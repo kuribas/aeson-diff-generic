@@ -1,32 +1,60 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, TypeFamilies, FlexibleContexts, ExistentialQuantification #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, StandaloneDeriving, GeneralizedNewtypeDeriving #-}
 module Data.Aeson.Diff.Generic where
 import Data.Aeson
 import Data.Aeson.Patch
 import Data.Aeson.Diff
 import Data.Aeson.Pointer
-import Control.Monad 
+import Control.Monad
+import Data.Functor.Const
+import Data.Functor.Compose
+import Data.Functor.Identity
 import qualified Data.Text as T
+import qualified Data.Text.Lazy
 import Data.Dynamic
 import qualified Data.Set as Set
 import qualified Data.Sequence as Seq
---import qualified Data.Tree as Tree
 import qualified Data.Vector.Unboxed as UVector
 import qualified Data.Vector as Vector
 import qualified Data.Vector.Storable as SVector
 import qualified Data.Vector.Primitive as PVector
-
-import Data.Functor.Const
-import Data.Functor.Compose
+import qualified Data.HashMap.Lazy as LHashMap
+import qualified Data.HashMap.Strict as SHashMap
+import qualified Data.HashSet as HashSet
+import qualified Data.Map as Map
+import Data.Word
+import Data.Int
+import Numeric.Natural
+import Data.Version
+import Foreign.C.Types
+import qualified Data.IntSet
+import Data.Scientific
+import Data.Time.LocalTime
+import Data.Time.Clock
+import Data.Time.Calendar
+import Data.UUID.Types
+import Data.Ratio
+import Data.Fixed
+import Data.Semigroup
+import qualified Data.List.NonEmpty
+import qualified Data.DList
+import Data.Hashable
+import Data.Proxy
+import Data.Tagged
 
 type FieldLens s v = forall f.Functor f => (v -> f v) -> f s
 type LensConsumer s r = forall v. (JsonPatch v) => FieldLens s v -> Result r
 
 class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
   fieldLens :: s -> Key -> LensConsumer s r -> Result r
+  fieldLens _ _ _ = Error "Invalid pointer"
+
   deleteAt :: Key -> s -> (forall v.(JsonPatch v) => v -> r)
            -> Result (r, s)
+  deleteAt _ _ _ = Error "Illegal operation"
+
   insertAt :: Key -> s -> r -> (forall v.(JsonPatch v) => r -> Result v)
            -> Result s
+  insertAt _ _ _ _ = Error "Illegal operation"
 
 patch :: JsonPatch a => Patch -> a -> Result a
 patch = foldr (>=>) pure . map patchOp' . patchOperations
@@ -77,7 +105,7 @@ deleteAtPointer :: JsonPatch s => Pointer -> s ->
                 (forall v.JsonPatch v => v -> r) -> Result (r, s)
 deleteAtPointer (Pointer []) _ _ = Error "Invalid pointer"
 deleteAtPointer (Pointer [key]) s f = deleteAt key s f
-deleteAtPointer (Pointer (key:path)) s f = 
+deleteAtPointer (Pointer (key:path)) s f =
   fieldLens s key $ \l ->
     getCompose $ l (\v -> Compose $ deleteAtPointer (Pointer path) v f)
 
@@ -146,6 +174,122 @@ strKey (AKey i) = show i
 
 isEndKey :: Key -> Bool
 isEndKey = (== OKey "-")
+
+newtypeFieldLens :: (JsonPatch u, JsonPatch w) => (u -> w) -> (w -> u)
+                 -> w -> Key -> LensConsumer w r -> Result r
+newtypeFieldLens wrap unwrap el key cont = do
+  fieldLens (unwrap el) key $ \l -> cont $ fmap wrap . l
+{-# INLINE newtypeFieldLens #-}
+  
+newtypeInsertAt :: (JsonPatch u, JsonPatch w) => (u -> w) -> (w -> u)
+                -> Key -> w -> r ->  (forall v.(JsonPatch v) => r -> Result v)
+                -> Result w
+newtypeInsertAt wrap unwrap key el r f = 
+  wrap <$> insertAt key (unwrap el) r f
+{-# INLINE newtypeInsertAt #-}  
+
+newtypeDeleteAt :: (JsonPatch u, JsonPatch w) => (u -> w) -> (w -> u)
+                -> Key -> w -> (forall v.(JsonPatch v) => v -> r)
+                -> Result (r, w)
+newtypeDeleteAt wrap unwrap key el f = 
+  fmap wrap <$> deleteAt key (unwrap el) f
+{-# INLINE newtypeDeleteAt #-}    
+
+instance JsonPatch Bool
+instance JsonPatch Char
+instance JsonPatch Double
+instance JsonPatch Float
+instance JsonPatch Int
+instance JsonPatch Int8
+instance JsonPatch Int16
+instance JsonPatch Int32
+instance JsonPatch Int64
+instance JsonPatch Integer
+instance JsonPatch Natural
+instance JsonPatch Ordering
+instance JsonPatch Word
+instance JsonPatch Word8
+instance JsonPatch Word16
+instance JsonPatch Word32
+instance JsonPatch Word64
+instance JsonPatch ()
+instance JsonPatch T.Text
+instance JsonPatch Data.Text.Lazy.Text
+instance JsonPatch Version
+instance JsonPatch CTime
+instance JsonPatch Data.IntSet.IntSet
+instance JsonPatch Scientific
+instance JsonPatch LocalTime
+instance JsonPatch TimeOfDay
+instance JsonPatch UTCTime
+instance JsonPatch NominalDiffTime
+instance JsonPatch DiffTime
+instance JsonPatch Day
+instance JsonPatch UUID
+instance JsonPatch DotNetTime
+instance (Eq a, FromJSON a, Typeable a, ToJSON a) => JsonPatch (Data.DList.DList a)
+instance (Hashable a, Eq a, FromJSON a, Typeable a, ToJSON a) => JsonPatch (HashSet.HashSet a)
+instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  => JsonPatch (Ratio a)
+instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) => JsonPatch (Fixed a)
+instance (Typeable a) => JsonPatch (Proxy a)
+
+instance JsonPatch a => JsonPatch (Min a) where
+  fieldLens = newtypeFieldLens Min getMin
+  insertAt = newtypeInsertAt Min getMin
+  deleteAt = newtypeDeleteAt Min getMin
+
+instance JsonPatch a => JsonPatch (Max a) where
+  fieldLens = newtypeFieldLens Max getMax
+  insertAt = newtypeInsertAt Max getMax
+  deleteAt = newtypeDeleteAt Max getMax
+
+instance JsonPatch a => JsonPatch (First a) where
+  fieldLens = newtypeFieldLens First getFirst
+  insertAt = newtypeInsertAt First getFirst
+  deleteAt = newtypeDeleteAt First getFirst
+
+instance JsonPatch a => JsonPatch (Last a) where
+  fieldLens = newtypeFieldLens Last getLast
+  insertAt = newtypeInsertAt Last getLast
+  deleteAt = newtypeDeleteAt Last getLast
+
+instance JsonPatch a => JsonPatch (WrappedMonoid a) where
+  fieldLens = newtypeFieldLens WrapMonoid unwrapMonoid
+  insertAt = newtypeInsertAt WrapMonoid unwrapMonoid
+  deleteAt = newtypeDeleteAt WrapMonoid unwrapMonoid
+
+instance JsonPatch a => JsonPatch (Option a) where
+  fieldLens = newtypeFieldLens Option getOption
+  insertAt = newtypeInsertAt Option getOption
+  deleteAt = newtypeDeleteAt Option getOption
+
+instance JsonPatch a => JsonPatch (Identity a) where
+  fieldLens = newtypeFieldLens Identity runIdentity
+  insertAt = newtypeInsertAt Identity runIdentity
+  deleteAt = newtypeDeleteAt Identity runIdentity
+
+instance JsonPatch a => JsonPatch (Dual a) where
+  fieldLens = newtypeFieldLens Dual getDual
+  insertAt = newtypeInsertAt Dual getDual
+  deleteAt = newtypeDeleteAt Dual getDual
+
+instance (Typeable a, JsonPatch b) => JsonPatch (Tagged a b) where
+  fieldLens = newtypeFieldLens Tagged unTagged
+  insertAt = newtypeInsertAt Tagged unTagged
+  deleteAt = newtypeDeleteAt Tagged unTagged
+  
+
+
+instance (JsonPatch a, JsonPatch b) => JsonPatch (Either a b)
+instance JsonPatch a => JsonPatch (Data.List.NonEmpty.NonEmpty a)
+instance JsonPatch a => JsonPatch (Maybe a)
+instance JsonPatch Value where
+instance (JsonPatch a, JsonPatch b) => JsonPatch (a, b)
+-- instance JsonPatch (Map a)
+-- instance JsonPatch (Tree a)
+-- instance JsonPatch Product
+-- instance JsonPatch Sum
+-- instance JsonPatch Compose
 
 splitList :: Int -> [a] -> Maybe ([a], [a])
 splitList i _ | i < 0 = Nothing
@@ -336,4 +480,27 @@ instance (PVector.Prim a, JsonPatch a) => JsonPatch (PVector.Vector a) where
     let (l, r) = PVector.splitAt i vec
     pure (f $ PVector.head r, l PVector.++ PVector.tail r)
 
+getHashMapKey s = case fromJSONKey of
+  FromJSONKeyCoerce coerce -> _                 -- !(CoerceText a)	-> _
+  FromJSONKeyText fromText -> pure $ fromText $ T.pack s          -- !(Text -> a) -> _
+  FromJSONKeyTextParser parse -> _              --  !(Text -> Parser a)	-> _
+  FromJSONKeyValue _ -> Error "Invalid path"
+
+instance (FromJSONKey k, JsonPatch a) => JsonPatch (LHashMap.HashMap k a) where
+  fieldLens hm key cont = do
+    let s = strKey key
+    k <- _
+
+    case LHashMap.lookup k hm of
+      Nothing -> Error "key not found"
+      Just val ->
+        cont $ \f -> (\v -> LHashMap.insert k v hm) <$> f val
+      _ -> Error "Index out of bounds"
+
+  insertAt key hm v f = (\v -> LHashMap.insert (_ key) v hm) <$> f v
+  deleteAt key lst f = do
+    i <- intKey key
+    case splitList i lst of
+      Just (l, r1:rs) -> pure (f r1, l ++ rs)
+      _ -> Error "Index out of bounds"
 

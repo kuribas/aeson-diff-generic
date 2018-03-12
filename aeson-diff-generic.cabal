@@ -21,6 +21,6 @@ Library
   Ghc-options: -Wall
   Build-depends: base >= 4.8 && <= 5, aeson, aeson-diff, bytestring (>=0.10),
                  hashable, mtl, scientific, text, unordered-containers, containers,
-                 vector, bytestring
+                 vector, bytestring, time, uuid-types, dlist, tagged
   Exposed-Modules:
     Data.Aeson.Diff.Generic
