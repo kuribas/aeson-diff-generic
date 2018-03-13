@@ -1,12 +1,15 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, DefaultSignatures #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, DefaultSignatures, MultiWayIf #-}
 module Data.Aeson.Diff.Generic
-  (Data.Aeson.Diff.Generic.patch, patchOp, JsonPatch(..), getValueAtPointer) where
+  (Data.Aeson.Diff.Generic.patch, applyOperation, JsonPatch(..), getValueAtPointer,
+   newtypeFieldLens, newtypeInsertAt, newtypeDeleteAt,
+   FieldLens', LensConsumer, FieldLens(..)
+  ) where
 
 import Data.Aeson
 import Data.Aeson.Types
 import Data.Aeson.Patch
-import Data.Aeson.Diff
-import Data.Aeson.Pointer
+import qualified Data.Aeson.Diff as Diff
+import Data.Aeson.Pointer as Pointer
 import Control.Monad
 import Data.Functor.Const
 import Data.Functor.Compose
@@ -131,17 +134,22 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
     pure s
   {-# INLINABLE testAtPointer #-}    
 
-    
 getValueAtPointer :: JsonPatch s => Pointer -> s -> Result Value
 getValueAtPointer p s = getAtPointer p s toJSON
+{-# INLINE [1] getValueAtPointer #-}
+{-# RULES "getValueAtPointer/Value" getValueAtPointer = Pointer.get #-} 
 
 patch :: JsonPatch a => Patch -> a -> Result a
-patch = foldr (>=>) pure . map patchOp . patchOperations
+patch = foldr (>=>) pure . map applyOperation . patchOperations
+{-# INLINE [1] patch #-}
+{-# RULES "patch/Value" patch = Diff.patch #-} 
 
-patchOp :: JsonPatch a => Operation -> a -> Result a
-patchOp op v = case patchOp' op v of
+applyOperation :: JsonPatch a => Operation -> a -> Result a
+applyOperation op v = case patchOp op v of
   Error msg -> Error $ opError op ++ msg
   Success ret -> Success ret
+{-# INLINE [1] applyOperation #-}
+{-# RULES "applyOperation/Value" applyOperation = Diff.applyOperation #-} 
 
 opError :: Operation -> String
 opError op = mconcat [
@@ -176,21 +184,21 @@ getDynamicAtPointer :: JsonPatch s => Pointer -> s -> Result Dynamic
 getDynamicAtPointer p s = getAtPointer p s toDyn
 {-# INLINE getDynamicAtPointer #-}  
 
-patchOp' :: JsonPatch a => Operation -> a -> Result a
-patchOp' (Add ptr val) s = addAtPointer ptr s val fromJSON
-patchOp' (Rem ptr) s = snd <$> deleteAtPointer ptr s (const ())
-patchOp' (Cpy toPath fromPath) s = copyPath fromPath toPath s
-patchOp' (Mov toPath fromPath) s = movePath fromPath toPath s
-patchOp' (Rep ptr val) s = replaceAtPointer ptr s val fromJSON
-patchOp' (Tst ptr val) s = testAtPointer ptr s val fromJSON
+patchOp :: JsonPatch a => Operation -> a -> Result a
+patchOp (Add ptr val) s = addAtPointer ptr s val fromJSON
+patchOp (Rem ptr) s = snd <$> deleteAtPointer ptr s (const ())
+patchOp (Cpy toPath fromPath) s = copyPath fromPath toPath s
+patchOp (Mov toPath fromPath) s = movePath fromPath toPath s
+patchOp (Rep ptr val) s = replaceAtPointer ptr s val fromJSON
+patchOp (Tst ptr val) s = testAtPointer ptr s val fromJSON
             
 intKey :: Key -> Result Int
 intKey (OKey _) = Error "expected Array Key."
 intKey (AKey i) = pure i
 
-strKey :: Key -> String
-strKey (OKey s) = T.unpack s
-strKey (AKey i) = show i
+strKey :: Key -> T.Text
+strKey (OKey s) =  s
+strKey (AKey i) = T.pack $ show i
 
 isEndKey :: Key -> Bool
 isEndKey = (== OKey "-")
@@ -252,6 +260,19 @@ instance (Hashable a, Eq a, FromJSON a, Typeable a, ToJSON a) => JsonPatch (Hash
 instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  => JsonPatch (Ratio a)
 instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) => JsonPatch (Fixed a)
 instance (Typeable a) => JsonPatch (Proxy a)
+instance (FieldLens a) => JsonPatch (Min a)
+instance FieldLens a => JsonPatch (Max a)
+instance FieldLens a => JsonPatch (First a)
+instance FieldLens a => JsonPatch (Last a)
+instance FieldLens a => JsonPatch (WrappedMonoid a)
+instance (FieldLens a, JsonPatch a) => JsonPatch (Option a)
+instance FieldLens a => JsonPatch (Identity a)
+instance FieldLens a => JsonPatch (Dual a)
+instance (FieldLens b, Typeable a) => JsonPatch (Tagged a b)
+instance (JsonPatch a, JsonPatch b) => JsonPatch (Either a b)
+instance JsonPatch a => JsonPatch (Data.List.NonEmpty.NonEmpty a)
+instance JsonPatch a => JsonPatch (Maybe a)
+instance (JsonPatch a, JsonPatch b) => JsonPatch (a, b)
 
 instance FieldLens Bool
 instance FieldLens Char
@@ -339,7 +360,7 @@ instance (FieldLens b, Typeable a) => FieldLens (Tagged a b) where
 instance (JsonPatch a, JsonPatch b) => FieldLens (Either a b)
 instance JsonPatch a => FieldLens (Data.List.NonEmpty.NonEmpty a)
 instance JsonPatch a => FieldLens (Maybe a)
-instance FieldLens Value where
+
 instance (JsonPatch a, JsonPatch b) => FieldLens (a, b)
 -- instance FieldLens (Map a)
 -- instance FieldLens (Tree a)
@@ -372,14 +393,11 @@ instance JsonPatch a => FieldLens [a] where
         case splitList i lst of
           Just (l, r) -> (\v' -> l ++ v':r) <$> f v
           Nothing -> Error "Index out of bounds"
-  {-# INLINE insertAt #-}
-
   deleteAt key lst f = do
     i <- intKey key
     case splitList i lst of
       Just (l, r1:rs) -> pure (f r1, l ++ rs)
       _ -> Error "Index out of bounds"
-  {-# INLINE deleteAt #-}
 
 instance (Ord a, JsonPatch a) => JsonPatch (Set.Set a) 
 instance (Ord a, JsonPatch a) => FieldLens (Set.Set a) where
@@ -399,14 +417,12 @@ instance (Ord a, JsonPatch a) => FieldLens (Set.Set a) where
         when (i < 0 || i >= Set.size st) $
           Error "Index out of bounds"
         (`Set.insert` st) <$> f v
-  {-# INLINE insertAt #-}
 
   deleteAt key st f = do
     i <- intKey key
     when (i < 0 || i >= Set.size st) $
       Error "Index out of bounds"
     pure (f $ Set.elemAt i st, Set.deleteAt i st)
-  {-# INLINE deleteAt #-}
 
 instance (Ord a, JsonPatch a) => JsonPatch (Seq.Seq a) where
 instance (Ord a, JsonPatch a) => FieldLens (Seq.Seq a) where
@@ -424,8 +440,6 @@ instance (Ord a, JsonPatch a) => FieldLens (Seq.Seq a) where
     | otherwise = do
         i <- intKey key
         (\v'-> Seq.insertAt i v' sq) <$> f v
-  {-# INLINE insertAt #-}
-
 
   deleteAt key sq f = do
     i <- intKey key
@@ -433,17 +447,6 @@ instance (Ord a, JsonPatch a) => FieldLens (Seq.Seq a) where
       Nothing -> Error "Index out of bounds"
       Just v -> pure (f v, Seq.deleteAt i sq)
   {-# INLINE deleteAt #-}
-
--- instance (Ord a, JsonPatch a) => JsonPatch (Tree.Tree a) where
---   fieldLens (Tree.Node a forest) key cont = do
---     i <- intKey key
---     case i of
---       0 -> cont $ \f -> flip Tree.Node forest <$> f a
---       1 -> cont $ \f -> Tree.Node a <$> f forest
---       _ -> Error "Index out of bounds"
-    
---   insertAt _ _ _ _ = Error "Illegal operation"
---   deleteAt _ _ _ = Error "Illegal operation"
 
 instance (JsonPatch a) => FieldLens (Vector.Vector a) where
   fieldLens v key cont = do
@@ -454,7 +457,8 @@ instance (JsonPatch a) => FieldLens (Vector.Vector a) where
     cont $ \f ->
       (\v' -> l Vector.++ Vector.cons v' (Vector.tail r)) <$>
       f (Vector.head r)
-
+  {-# INLINE fieldLens #-}
+  
   insertAt key vec v f
     | isEndKey key = Vector.snoc vec <$> f v
     | otherwise = do
@@ -471,6 +475,7 @@ instance (JsonPatch a) => FieldLens (Vector.Vector a) where
     let (l, r) = Vector.splitAt i vec
     pure (f $ Vector.head r, l Vector.++ Vector.tail r)
 
+instance (UVector.Unbox a, JsonPatch a) => JsonPatch (UVector.Vector a)
 instance (UVector.Unbox a, JsonPatch a) => FieldLens (UVector.Vector a) where
   fieldLens v key cont = do
     i <- intKey key
@@ -480,6 +485,7 @@ instance (UVector.Unbox a, JsonPatch a) => FieldLens (UVector.Vector a) where
     cont $ \f ->
       (\v' -> l UVector.++ UVector.cons v' (UVector.tail r)) <$>
       f (UVector.head r)
+  {-# INLINE fieldLens #-}
 
   insertAt key vec v f
     | isEndKey key = UVector.snoc vec <$> f v
@@ -497,6 +503,7 @@ instance (UVector.Unbox a, JsonPatch a) => FieldLens (UVector.Vector a) where
     let (l, r) = UVector.splitAt i vec
     pure (f $ UVector.head r, l UVector.++ UVector.tail r)
 
+instance (SVector.Storable a, JsonPatch a) => JsonPatch (SVector.Vector a) 
 instance (SVector.Storable a, JsonPatch a) => FieldLens (SVector.Vector a) where
   fieldLens v key cont = do
     i <- intKey key
@@ -506,6 +513,7 @@ instance (SVector.Storable a, JsonPatch a) => FieldLens (SVector.Vector a) where
     cont $ \f ->
       (\v' -> l SVector.++ SVector.cons v' (SVector.tail r)) <$>
       f (SVector.head r)
+  {-# INLINE fieldLens #-}
 
   insertAt key vec v f
     | isEndKey key = SVector.snoc vec <$> f v
@@ -523,6 +531,7 @@ instance (SVector.Storable a, JsonPatch a) => FieldLens (SVector.Vector a) where
     let (l, r) = SVector.splitAt i vec
     pure (f $ SVector.head r, l SVector.++ SVector.tail r)
 
+instance (PVector.Prim a, JsonPatch a) => JsonPatch (PVector.Vector a) 
 instance (PVector.Prim a, JsonPatch a) => FieldLens (PVector.Vector a) where
   fieldLens v key cont = do
     i <- intKey key
@@ -532,6 +541,7 @@ instance (PVector.Prim a, JsonPatch a) => FieldLens (PVector.Vector a) where
     cont $ \f ->
       (\v' -> l PVector.++ PVector.cons v' (PVector.tail r)) <$>
       f (PVector.head r)
+  {-# INLINE fieldLens #-}
 
   insertAt key vec v f
     | isEndKey key = PVector.snoc vec <$> f v
@@ -559,7 +569,7 @@ getMapKey s = case fromJSONKey of
 getHashMapKey :: FromJSONKey a => Key -> Result a
 getHashMapKey key =
   maybe (Error "Invalid path") pure =<<
-  getMapKey (T.pack $ strKey key) 
+  getMapKey (strKey key) 
 
 instance (ToJSONKey k, Typeable k, Eq k, Hashable k, FromJSONKey k, JsonPatch a)
          => JsonPatch (HashMap.HashMap k a)
@@ -576,11 +586,73 @@ instance (ToJSONKey k, Typeable k, Eq k, Hashable k, FromJSONKey k, JsonPatch a)
   insertAt key hm v f = do
     k <- getHashMapKey key
     (\v' -> HashMap.insert k v' hm) <$> f v
-  {-# INLINE insertAt #-}
   
   deleteAt key hm f = do
     k <- getHashMapKey key
     case HashMap.lookup k hm of
       Nothing -> Error "Invalid Pointer"
       Just val -> pure (f val, HashMap.delete k hm)
-  {-# INLINE deleteAt #-}
+
+instance (FromJSONKey k, ToJSONKey k, Eq k, Ord k, JsonPatch k, JsonPatch a)
+         => JsonPatch (Map.Map k a)
+instance (FromJSONKey k, ToJSONKey k, Eq k, Ord k, JsonPatch a, JsonPatch k)
+         => FieldLens (Map.Map k a) where
+  fieldLens map1 key cont = do
+    k <- getMapKey $ strKey key
+    case k of
+      Nothing -> do
+        i <- intKey key
+        when (i < 0 || i >= Map.size map1) $
+          Error "Invalid Pointer"
+        let val = Map.elemAt i map1
+        cont $ \f -> (\(k2, v) -> Map.insert k2 v $ Map.deleteAt i map1)
+                     <$> f val
+      Just s ->
+        case Map.lookup s map1 of
+          Nothing -> Error "Invalid Pointer"
+          Just val ->
+            cont $ \f -> (\v -> Map.insert s v map1) <$> f val
+  {-# INLINE fieldLens #-}
+
+  insertAt key map1 val f = do
+    k <- getMapKey $ strKey key
+    case k of
+      Nothing -> do
+        if isEndKey key then pure () else do
+          i <- intKey key
+          when (i < 0 || i >= Map.size map1) $
+            Error "Invalid Pointer"
+        (k2, v) <- f val
+        pure $ Map.insert k2 v map1
+      Just s ->
+        (\v -> Map.insert s v map1) <$> f val
+        
+  deleteAt key map1 f = do
+    k <- getMapKey $ strKey key
+    case k of
+      Nothing -> do
+        i <- intKey key
+        when (i < 0 || i >= Map.size map1) $
+          Error "Invalid Pointer"
+        pure (f $ Map.elemAt i map1, Map.deleteAt i map1)
+      Just s -> case Map.lookup s map1 of
+        Nothing -> Error "Invalid Pointer"
+        Just v -> pure (f v, Map.delete s map1)
+
+instance JsonPatch Value where
+  getAtPointer ptr val f = f <$> Pointer.get ptr val
+  deleteAtPointer ptr val f =
+    (,) <$> getAtPointer ptr val f <*>
+    Diff.applyOperation (Rem ptr) val
+  addAtPointer ptr val val2 f = do
+    val3 <- f val2
+    Diff.applyOperation (Add ptr val3) val
+  copyPath from to = Diff.applyOperation (Cpy to from)
+  movePath from to = Diff.applyOperation (Mov to from)
+  replaceAtPointer ptr val val2 f = do
+    val3 <- f val2
+    Diff.applyOperation (Rep ptr val3) val
+  testAtPointer ptr val val2 f = do
+    val3 <- f val2
+    Diff.applyOperation (Tst ptr val3) val
+
