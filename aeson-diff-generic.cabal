@@ -21,6 +21,9 @@ Library
   Ghc-options: -Wall
   Build-depends: base >= 4.8 && <= 5, aeson, aeson-diff, bytestring (>=0.10),
                  hashable, mtl, scientific, text, unordered-containers, containers,
-                 vector, bytestring, time, uuid-types, dlist, tagged
-  Exposed-Modules:
-    Data.Aeson.Diff.Generic
+                 vector, bytestring, time, uuid-types, dlist, tagged, template-haskell,
+                 th-abstraction
+  Exposed-Modules: Data.Aeson.Diff.Generic
+                   Data.Aeson.Diff.Generic.TH
+  Other-Modules: Data.Aeson.Diff.Generic.Types
+                 Data.Aeson.Diff.Generic.Instances
