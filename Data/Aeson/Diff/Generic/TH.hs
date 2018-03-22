@@ -1,6 +1,7 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf, ExistentialQuantification #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf, ExistentialQuantification,
+    RecordWildCards, TemplateHaskell #-}
 module Data.Aeson.Diff.Generic.TH
-  (deriveFieldLensHiding) where
+  where
 
 import Data.Aeson.Types
 import Data.Aeson.Patch
@@ -47,9 +48,6 @@ import Data.List
 import Data.Aeson.Diff.Generic.Types
 import Data.Aeson.Diff.Generic.Instances
 
-deriveFieldLensHiding :: Options -> [String] -> Name -> DecsQ
-deriveFieldLensHiding options exclude name = _
-
 type PathLens s = s -> Path -> Result (Path, Path, GetSet s)
 
 getAtPointerFromLens :: (JsonPatch s) => PathLens s -> Pointer -> s -> (forall v.JsonPatch v => v -> r) -> Result r
@@ -92,39 +90,83 @@ testAtPointerFromLens l (Pointer (key:path)) s val f = do
   testAtPointer (Pointer path) x val f
   pure s
 
+data Fake a = Fake1 Int a
+            | Fake2 {arg1 :: Int, arg2 :: String}
+            | Fake3 a
+
+fakePathLens :: JsonPatch a => PathLens (Fake a) 
+fakePathLens x path = case x of
+  Fake1 a b -> case path of
+    (OKey "contents":key:path2)
+      | key == AKey 0 -> pure ([OKey "contents", AKey 0], path2, GetSet a (\a2 -> Fake1 a2 b))
+      | key == AKey 1 -> pure ([OKey "contents", AKey 1], path2, GetSet b (\b2 -> Fake1 a b2))
+  Fake2 a b -> case path of
+    (key:path2)
+      | key == OKey "arg1" -> pure ([OKey "arg1"], path2, GetSet a (\a2 -> Fake2 a2 b))
+      | key == OKey "arg2" -> pure ([OKey "arg2"], path2, GetSet b (\b2 -> Fake2 a b2))
+  Fake3 a -> case path of
+    (OKey "contents":path2) -> pure ([OKey "contents"], path2, GetSet a (\a2 -> Fake3 a2))
+  _ -> Error "invalid path"
+  
+makePathLens :: Options -> Name -> Q (Name, Dec)
+makePathLens options name = do
+  typeInfo <- reifyDatatype name
+  funName <- newName "pathLens"
+  obj <- newName "obj"
+  path <- newName "path"
+  matches <- mapM (pathLensMatches path options) (datatypeCons typeInfo)
+  let body = CaseE (VarE path) matches
+      rhs = Clause [VarP obj, VarP path] (NormalB body) []
+  pure (funName, FunD funName [rhs])
+
+pathLensMatches :: Name -> Options -> ConstructorInfo -> Q Match  
+pathLensMatches path options conInfo =
+  case length $ constructorFields conInfo of
+    0 -> match (conP (constructorName conInfo) [])
+         (normalB [| Error "Invalid path" |]) []
+    1 -> do v <- newName "var"
+            match (conP (constructorName conInfo) [varP v])
+              (normalB [| Error "" |]) []
+    n -> do vs <- replicateM n (newName "var")
+            let innerCase = caseE (varE path) []
+            match (conP (constructorName conInfo) (map varP vs))
+              (normalB innerCase) []
+
 {-
  TagedObject:
 
- fieldLens key x = case x of
-    Field1 {a::_; b::_; c::_} -> case key of
-      OKey (fieldLabelModifier "a") -> pure $ GetSet a (\a' -> Field1 a b c)
-      Okey "b" -> ...
-      _ -> Error "invalid key: "
-    Field2 a b c -> case key of
-      contentsFieldName -> let
-        f (AKey 0) = pure $ GetSet a (\a' -> Field1 a' b c)
-        _   
-        content = ObjectContents key c f where
-        in GetSet content getObjectContents
+ pathLens = \x path -> case x of
+    Field1 {a::_; b::_; c::_} -> case path of
+      (key:path)
+        | key == (OKey (fieldLabelModifier "a"):path) -> pure $ ([key], path, GetSet a (\a' -> Field1 a b c))
+        | key == (Okey "b":path) -> ...
+      _ -> Error "Invalid path"
+    Field2 a b c -> case path of
+      (contentsFieldName:key:path)
+       | key == (AKey 0) -> pure ([contentsFieldName, key], path, GetSet a (\a' -> Field1 a' b c))
+        
       _ -> "invalid key"
- 
 
-    OneField a b c -> case key of
-      AKey 0 -> GetSet a (\a' -> Field a' b c)
+ OneField a b c -> case path of
+      (AKey 0:path) -> ([AKey 0], path, GetSet a (\a' -> Field a' b c))
       ...
      _ -> "invalid key"
 
     
 ObjectWithSingleField:
- fieldLens key x = case x of
-    Field1 {a::_; b::_; c::_}
-      | key == OKey (fieldLabelModifier "Field1") ->
+ fieldLens key x = case case x of
+    Field1 {a::_; b::_; c::_} -> case path of
+      (OKey constructorTagModifier "Field1": OKey (fieldLabelModifier "a"): path) ->
          GetSet a (\a' -> Field1 a b c)
       _ -> "invalid key: "
     Field2 a b c
-      | key == OKey (fieldLabelModifier "Field2") ->
+      (constructorTagModifier "field2": OKey (fieldLabelModifier "Field2"): path) ->
          GetSet (a, b, c) (\(a', b', c') -> Field2 a' b' c')
       _ -> "invalid key"
  
     OneField a b c
+
+TwoElemArray:
+  
+  
 -}
