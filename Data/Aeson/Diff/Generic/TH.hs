@@ -8,45 +8,12 @@ import Data.Aeson.Patch
 import qualified Data.Aeson.Diff as Diff
 import Data.Aeson.Pointer as Pointer
 import Control.Monad
-import Data.Functor.Identity
-import qualified Data.Text as T
-import qualified Data.Text.Lazy
 import Data.Dynamic
-import qualified Data.Set as Set
-import qualified Data.Sequence as Seq
-import qualified Data.Vector.Unboxed as UVector
-import qualified Data.Vector as Vector
-import qualified Data.Vector.Storable as SVector
-import qualified Data.Vector.Primitive as PVector
-import qualified Data.HashMap.Lazy as HashMap
-import qualified Data.HashSet as HashSet
-import qualified Data.Map as Map
-import Data.Word
-import Data.Int
-import Numeric.Natural
-import Data.Version
-import Foreign.C.Types
-import qualified Data.IntSet
-import Data.Scientific
-import Data.Time.LocalTime
-import Data.Time.Clock
-import Data.Time.Calendar
-import Data.UUID.Types
-import Data.Ratio
-import Data.Fixed
-import Data.Semigroup
-import qualified Data.List.NonEmpty
-import qualified Data.DList
-import Data.Hashable
-import Data.Proxy
-import Data.Tagged
-import Unsafe.Coerce
 import Language.Haskell.TH
 import Language.Haskell.TH.Datatype
-import Data.Traversable
 import Data.List
 import Data.Aeson.Diff.Generic.Types
-import Data.Aeson.Diff.Generic.Instances
+import Data.Maybe
 
 type PathLens s = s -> Path -> Result (Path, Path, GetSet s)
 
@@ -93,7 +60,7 @@ testAtPointerFromLens l (Pointer (key:path)) s val f = do
 data Fake a = Fake1 Int a
             | Fake2 {arg1 :: Int, arg2 :: String}
             | Fake3 a
-
+{-
 fakePathLens :: JsonPatch a => PathLens (Fake a) 
 fakePathLens x path = case x of
   Fake1 a b -> case path of
@@ -107,6 +74,7 @@ fakePathLens x path = case x of
   Fake3 a -> case path of
     (OKey "contents":path2) -> pure ([OKey "contents"], path2, GetSet a (\a2 -> Fake3 a2))
   _ -> Error "invalid path"
+-}
   
 makePathLens :: Options -> Name -> Q (Name, Dec)
 makePathLens options name = do
@@ -114,21 +82,53 @@ makePathLens options name = do
   funName <- newName "pathLens"
   obj <- newName "obj"
   path <- newName "path"
-  matches <- mapM (pathLensMatches path options) (datatypeCons typeInfo)
+  matches <- mapM (pathLensMatches path "contents" options) (datatypeCons typeInfo)
   let body = CaseE (VarE path) matches
       rhs = Clause [VarP obj, VarP path] (NormalB body) []
   pure (funName, FunD funName [rhs])
 
-pathLensMatches :: Name -> Options -> ConstructorInfo -> Q Match  
-pathLensMatches path options conInfo =
+makeKeyP :: String -> Pat
+makeKeyP str = _
+
+makeKeyE :: String -> Exp
+makeKeyE str = _
+
+select :: [a] -> [([a], a, [a])]
+select [] = []
+select l = zip3 (inits l) l (tail $ tails l)
+
+makePathCases :: Options -> Name -> Maybe Exp -> Maybe [Name] -> Name -> Int -> Q Match
+makePathCases options pathVar prefix recordFields consName nFields = do
+  vs <- replicateM nFields $ newName "var"
+  path2 <- newName "path"
+  let theMatches p = caseE (varE p) (map  )
+      mkPosMatch p2 (p, v, n) = _
+      mkRecMatch p2 (p, v, n) fieldName = _
+  _
+
+pathLensMatches :: Name -> String -> Options -> ConstructorInfo -> Q Match  
+pathLensMatches path contentsTag options conInfo = do
   case length $ constructorFields conInfo of
     0 -> match (conP (constructorName conInfo) [])
          (normalB [| Error "Invalid path" |]) []
     1 -> do v <- newName "var"
+            path2 <- newName "path"
+            v2 <- newName "var"
+            let innerCase = caseE (varE path)
+                  [ match (conP '(:) [pure . makeKeyP $ contentsTag, varP path2])
+                    (normalB [| pure ( [ $(pure $ makeKeyE contentsTag) ]
+                                     , $(varE path2)
+                                     , GetSet $(varE v)
+                                       $(lamE [varP v2] (appE (conE (constructorName conInfo)) (varE v2)))
+                                     ) |])
+                    []
+                  , match wildP (normalB [| Error "invalid Path" |]) []
+                  ]
             match (conP (constructorName conInfo) [varP v])
-              (normalB [| Error "" |]) []
+              (normalB innerCase) []
     n -> do vs <- replicateM n (newName "var")
-            let innerCase = caseE (varE path) []
+            let innerCase = caseE (varE path) [
+                                              ]
             match (conP (constructorName conInfo) (map varP vs))
               (normalB innerCase) []
 
