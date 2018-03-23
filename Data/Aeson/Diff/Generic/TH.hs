@@ -11,6 +11,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Datatype
 import Data.List
 import Data.Aeson.Diff.Generic.Types
+import Text.Read
 
 type PathLens s = s -> Path -> Result (Path, Path, GetSet s)
 
@@ -90,11 +91,15 @@ makePathLens options name = do
       rhs = Clause [VarP obj, VarP path] (NormalB body) []
   pure (funName, FunD funName [rhs])
 
-makeKeyP :: String -> Pat
-makeKeyP str = _
+makeKeyP :: String -> PatQ
+makeKeyP str = case readMaybe str of
+  Nothing -> [p| OKey $(litP $ StringL str) |]
+  Just i -> [p| AKey $(litP $ IntegerL i) |]
 
-makeKeyE :: String -> Exp
-makeKeyE str = _
+makeKeyE :: String -> ExpQ
+makeKeyE str = case readMaybe str of
+  Nothing -> [| OKey $(litE $ StringL str) |]
+  Just i -> [| AKey $(litE $ IntegerL i) |]
 
 select :: [a] -> [([a], a, [a])]
 select [] = []
@@ -131,8 +136,8 @@ makeRecCases pathVar prefix recordFields vs consName = do
   subPath <- newName "path"
   let mkRecMatch :: ([Name], Name, [Name]) -> String -> MatchQ
       mkRecMatch (p, v, n) fieldName =
-        match ([p| $(pure $ makeKeyP fieldName): $(varP subPath) |])
-        (normalB [| pure [ $(pure $ ListE $ prefix ++ [makeKeyE fieldName])
+        match ([p| $(makeKeyP fieldName): $(varP subPath) |])
+        (normalB [| pure [ $(listE $ (pure <$> prefix) ++ [makeKeyE fieldName])
                          , $(varE subPath)
                          , GetSet $(varE v)
                            $(lamE [varP v2] $
@@ -148,8 +153,8 @@ makeSingleCase pathVar prefix v consName = do
   v2 <- newName "var"
   subPath <- newName "path"
   caseE (varE pathVar)
-    [ match (conP '(:) [pure $ makeKeyP prefix, varP subPath])
-      (normalB [| pure ( [ $(pure $ makeKeyE prefix) ]
+    [ match (conP '(:) [makeKeyP prefix, varP subPath])
+      (normalB [| pure ( [ $(makeKeyE prefix) ]
                        , $(varE subPath)
                        , GetSet $(varE v)
                          $(lamE [varP v2] $
