@@ -1,12 +1,13 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, DefaultSignatures, MultiWayIf,
-   ExistentialQuantification, TemplateHaskell, GeneralizedNewtypeDeriving #-}
+   ExistentialQuantification #-}
 module Data.Aeson.Diff.Generic.Types where
 
 import Data.Dynamic
 import Data.Aeson.Types
 import Data.Aeson.Pointer as Pointer
+import Control.Monad
 
-data GetSet s = forall v. JsonPatch v => GetSet v (v -> s)
+data GetSet s = forall v. JsonPatch v => GetSet v (v -> Result s)
 
 class (Eq s, ToJSON s, FromJSON s, Typeable s) => FieldLens s where
   fieldLens :: s -> Key -> Result (GetSet s)
@@ -35,7 +36,7 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
   deleteAtPointer (Pointer [key]) s f = deleteAt key s f
   deleteAtPointer (Pointer (key:path)) s f = do
     GetSet v setr <- fieldLens s key
-    fmap setr <$> deleteAtPointer (Pointer path) v f
+    join $ traverse setr <$> deleteAtPointer (Pointer path) v f
 
   addAtPointer :: Pointer -> s -> r ->
                (forall v.JsonPatch v => r -> Result v) -> Result s
@@ -105,7 +106,7 @@ getDynamic = maybe (Error "type mismatch") pure . fromDynamic
 updateAtKey :: FieldLens s => Key -> s -> (forall v.JsonPatch v => v -> Result v) -> Result s
 updateAtKey key s f = do
   GetSet v setr <- fieldLens s key
-  setr <$> f v
+  setr =<< f v
 {-# INLINE updateAtKey #-}
 
 setAtKey :: FieldLens s => Key -> s -> r -> (forall v.JsonPatch v => r -> Result v) -> Result s
@@ -120,7 +121,7 @@ newtypeFieldLens :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
                  -> w -> Key -> Result (GetSet w)
 newtypeFieldLens wrap unwrap el key = do
   GetSet v setr <- fieldLens (unwrap el) key
-  pure $ GetSet v (wrap . setr)
+  pure $ GetSet v (fmap wrap . setr)
 {-# INLINE newtypeFieldLens #-}
   
 newtypeInsertAt :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)

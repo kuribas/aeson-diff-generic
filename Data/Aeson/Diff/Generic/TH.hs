@@ -79,18 +79,6 @@ fakePathLens x path = case x of
   _ -> Error "invalid path"
 -}
   
-makePathLens :: Options -> Name -> Q (Name, Dec)
-makePathLens options name = do
-  typeInfo <- reifyDatatype name
-  funName <- newName "pathLens"
-  obj <- newName "obj"
-  path <- newName "path"
-  matches <- mapM (pathLensMatches path "contents" options)
-             (datatypeCons typeInfo)
-  let body = CaseE (VarE path) matches
-      rhs = Clause [VarP obj, VarP path] (NormalB body) []
-  pure (funName, FunD funName [rhs])
-
 makeKeyP :: String -> PatQ
 makeKeyP str = case readMaybe str of
   Nothing -> [p| OKey $(litP $ StringL str) |]
@@ -118,8 +106,8 @@ makePosCases pathVar prefix consName vs = do
   let mkPosMatch :: ([Name], Name, [Name]) -> Integer -> MatchQ
       mkPosMatch (p, v, n) i =
         match ([p| (AKey $(litP $ integerL i): $(varP subPath)) |])
-        (normalB [| pure [ $(pure $ ListE $ prefix ++ [
-                                AppE (ConE 'AKey) (LitE $ IntegerL i)])
+        (normalB [| pure [ $(listE $ (pure <$> prefix) ++ [
+                                appE (conE 'AKey) (litE $ IntegerL i)])
                          , $(varE subPath)
                          , GetSet $(varE v)
                            $(lamE [varP v2] $
@@ -163,20 +151,35 @@ makeSingleCase pathVar prefix v consName = do
       []
     , invalidMatch]
 
-pathLensMatches :: Name -> String -> Options -> ConstructorInfo -> MatchQ
-pathLensMatches pathVar contentsTag options conInfo = do
-  case length $ constructorFields conInfo of
-    0 -> match (conP (constructorName conInfo) [])
-         (normalB [| Error "Invalid path" |]) []
-    1 -> _
-    n -> do vs <- replicateM n (newName "var")
-            let innerCase = caseE (varE pathVar) []
-            match (conP (constructorName conInfo) (map varP vs))
-              (normalB innerCase) []
-
+makePathLens :: Options -> Name -> Q (Name, Dec)
+makePathLens options name = do
+  typeInfo <- reifyDatatype name
+  funName <- newName "pathLens"
+  _
 {-
- TagedObject:
 
+ Single Constructor, tagSingleConstructors == False:
+
+ * No Field: []
+ * One Field:  1
+ * two Fields: [1, 2]
+
+ record:
+ * Object ("one": 1, ... )
+
+ Sumtype:
+  TaggedObject:
+    {"tagfieldName": Cons1, "contentsFieldName": [1, 2]}
+
+  UntaggedValue:
+    {contents}
+
+  ObjectWithSingleField:
+    {"Cons1": [1, 2]}
+
+  TwoElemArray:
+   ["Cons1", [1, 2]]
+  
  pathLens = \x path -> case x of
     Field1 {a::_; b::_; c::_} -> case path of
       (key:path)

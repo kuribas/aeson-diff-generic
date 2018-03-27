@@ -215,7 +215,7 @@ instance JsonPatch a => FieldLens [a] where
     i <- intKey key
     case splitList i lst of
       Just (l, r1:rs) ->
-        pure $ GetSet r1 (\v -> l ++ v:rs)
+        pure $ GetSet r1 (\v -> pure $ l ++ v:rs)
       _ -> Error "Index out of bounds"
   {-# INLINE fieldLens #-}
 
@@ -238,7 +238,8 @@ instance (Ord a, JsonPatch a) => FieldLens (Set.Set a) where
     i <- intKey key
     when (i < 0 || i >= Set.size st) $
       Error "Index out of bounds"
-    pure $ GetSet (Set.elemAt i st) (\v -> Set.insert v $ Set.deleteAt i st)
+    pure $ GetSet (Set.elemAt i st) $ 
+      \v -> pure $ Set.insert v $ Set.deleteAt i st
   {-# INLINE fieldLens #-}
     
   insertAt key st v f
@@ -262,7 +263,8 @@ instance (Ord a, JsonPatch a) => FieldLens (Seq.Seq a) where
     i <- intKey key
     case Seq.lookup i sq of
       Nothing -> Error "Index out of bounds"
-      Just v -> pure $ GetSet v (\v' -> Seq.update i v' sq)
+      Just v -> pure $ GetSet v $
+        \v' -> pure $ Seq.update i v' sq
   {-# INLINE fieldLens #-}
 
   insertAt key sq v f
@@ -284,7 +286,8 @@ instance (JsonPatch a) => FieldLens (Vector.Vector a) where
     when (i < 0 || i >= Vector.length v) $
       Error "Index out of bounds"
     let (l, r) = Vector.splitAt i v
-    pure $ GetSet (Vector.head r) (\v' -> l Vector.++ Vector.cons v' (Vector.tail r))
+    pure $ GetSet (Vector.head r) $
+      \v' -> pure $ l Vector.++ Vector.cons v' (Vector.tail r)
       
   {-# INLINE fieldLens #-}
   
@@ -311,8 +314,8 @@ instance (UVector.Unbox a, JsonPatch a) => FieldLens (UVector.Vector a) where
     when (i < 0 || i >= UVector.length v) $
       Error "Index out of bounds"
     let (l, r) = UVector.splitAt i v
-    pure $ GetSet (UVector.head r)
-      (\v' -> l UVector.++ UVector.cons v' (UVector.tail r))
+    pure $ GetSet (UVector.head r) $
+      \v' -> pure $ l UVector.++ UVector.cons v' (UVector.tail r)
   {-# INLINE fieldLens #-}
 
   insertAt key vec v f
@@ -338,8 +341,8 @@ instance (SVector.Storable a, JsonPatch a) => FieldLens (SVector.Vector a) where
     when (i < 0 || i >= SVector.length v) $
       Error "Index out of bounds"
     let (l, r) = SVector.splitAt i v
-    pure $ GetSet (SVector.head r)
-      (\v' -> l SVector.++ SVector.cons v' (SVector.tail r))
+    pure $ GetSet (SVector.head r) $
+      \v' -> pure $ l SVector.++ SVector.cons v' (SVector.tail r)
   {-# INLINE fieldLens #-}
 
   insertAt key vec v f
@@ -365,8 +368,8 @@ instance (PVector.Prim a, JsonPatch a) => FieldLens (PVector.Vector a) where
     when (i < 0 || i >= PVector.length v) $
       Error "Index out of bounds"
     let (l, r) = PVector.splitAt i v
-    pure $ GetSet (PVector.head r)
-      (\v' -> l PVector.++ PVector.cons v' (PVector.tail r))
+    pure $ GetSet (PVector.head r) $
+      \v' -> pure $ l PVector.++ PVector.cons v' (PVector.tail r)
   {-# INLINE fieldLens #-}
 
   insertAt key vec v f
@@ -406,7 +409,7 @@ instance (ToJSONKey k, Typeable k, Eq k, Hashable k, FromJSONKey k, JsonPatch a)
     case HashMap.lookup k hm of
       Nothing -> Error "Invalid Pointer"
       Just val ->
-        pure $ GetSet val (\v -> HashMap.insert k v hm)
+        pure $ GetSet val (\v -> pure $ HashMap.insert k v hm)
   {-# INLINE fieldLens #-}
 
   insertAt key hm v f = do
@@ -432,13 +435,13 @@ instance (FromJSONKey k, ToJSONKey k, Eq k, Ord k, JsonPatch a, JsonPatch k)
           Error "Invalid Pointer"
         let val = Map.elemAt i map1
         pure $ GetSet val
-           (\(k2, v) -> Map.insert k2 v $ 
+           (\(k2, v) -> pure $ Map.insert k2 v $ 
                         Map.deleteAt i map1)
       Just s ->
         case Map.lookup s map1 of
           Nothing -> Error "Invalid Pointer"
           Just val ->
-            pure $ GetSet val (\v -> Map.insert s v map1)
+            pure $ GetSet val (\v -> pure $ Map.insert s v map1)
   {-# INLINE fieldLens #-}
 
   insertAt key map1 val f = do
