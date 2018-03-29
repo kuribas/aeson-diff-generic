@@ -1,25 +1,30 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf, ExistentialQuantification,
-    RecordWildCards, TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
+ExistentialQuantification, TemplateHaskell #-}
 module Data.Aeson.Diff.Generic.TH
   where
 
 import Data.Aeson.Types
 import Data.Aeson.Pointer as Pointer
-import Control.Monad
+import Data.Aeson
 import Data.Dynamic
 import Language.Haskell.TH
 import Language.Haskell.TH.Datatype
 import Data.List
 import Data.Aeson.Diff.Generic.Types
 import Text.Read
+import qualified Data.Text as T
+import Control.Monad
+import Data.Maybe
 
-type PathLens s = s -> Path -> Result (Path, Path, GetSet s)
+data GetSetPure s = forall v. JsonPatch v => GetSetPure v (v -> s)
+
+type PathLens s = s -> Path -> Result (Path, Path, GetSetPure s)
 
 getAtPointerFromLens :: (JsonPatch s) => PathLens s -> Pointer -> s
                      -> (forall v.JsonPatch v => v -> r) -> Result r
 getAtPointerFromLens _ (Pointer []) s f = pure $ f s
 getAtPointerFromLens l (Pointer path) s f = do
-    (_, subPath, GetSet subS _) <- l s path
+    (_, subPath, GetSetPure subS _) <- l s path
     getAtPointer (Pointer subPath) subS f
 
 movePathFromLens :: (JsonPatch s) => PathLens s -> Pointer -> Pointer -> s
@@ -28,7 +33,7 @@ movePathFromLens _ (Pointer []) (Pointer []) s = pure s
 movePathFromLens _ (Pointer []) (Pointer _) _ =
   Error "Cannot move to subpath"
 movePathFromLens l (Pointer fromPath) (Pointer toPath) s = do
-  (pref, toSubPath, GetSet x setr) <- l s toPath
+  (pref, toSubPath, GetSetPure x setr) <- l s toPath
   if pref `isPrefixOf` toPath
     then setr <$> movePath (Pointer (take (length pref) fromPath))
          (Pointer toSubPath) x
@@ -46,7 +51,7 @@ replaceAtPointerFromLens :: (JsonPatch s) => PathLens s -> Pointer -> s -> r ->
                             (forall v.JsonPatch v => r -> Result v) -> Result s
 replaceAtPointerFromLens _ (Pointer []) _ v f = f v
 replaceAtPointerFromLens l (Pointer path) s val f = do
-  (_, subPath, GetSet x setr) <- l s path
+  (_, subPath, GetSetPure x setr) <- l s path
   setr <$> replaceAtPointer (Pointer subPath) x val f
 
 testAtPointerFromLens :: (JsonPatch s) => PathLens s -> Pointer -> s -> r ->
@@ -56,42 +61,31 @@ testAtPointerFromLens _ (Pointer []) s r f = do
   if v == s then pure s
     else Error "Test failed"
 testAtPointerFromLens l (Pointer path) s val f = do
-  (_, subPath, GetSet x _) <- l s path
+  (_, subPath, GetSetPure x _) <- l s path
   _ <- testAtPointer (Pointer subPath) x val f
   pure s
 
-data Fake a = Fake1 Int a
-            | Fake2 {arg1 :: Int, arg2 :: String}
-            | Fake3 a
-{-
-fakePathLens :: JsonPatch a => PathLens (Fake a) 
-fakePathLens x path = case x of
-  Fake1 a b -> case path of
-    (OKey "contents":key:subPath)
-      | key == AKey 0 -> pure ([OKey "contents", AKey 0], subPath, GetSet a (\a2 -> Fake1 a2 b))
-      | key == AKey 1 -> pure ([OKey "contents", AKey 1], subPath, GetSet b (\b2 -> Fake1 a b2))
-  Fake2 a b -> case path of
-    (key:subPath)
-      | key == OKey "arg1" -> pure ([OKey "arg1"], subPath, GetSet a (\a2 -> Fake2 a2 b))
-      | key == OKey "arg2" -> pure ([OKey "arg2"], subPath, GetSet b (\b2 -> Fake2 a b2))
-  Fake3 a -> case path of
-    (OKey "contents":subPath) -> pure ([OKey "contents"], subPath, GetSet a (\a2 -> Fake3 a2))
-  _ -> Error "invalid path"
--}
+keyPat :: Key -> PatQ
+keyPat (OKey str) = conP 'OKey [litP $ stringL $ T.unpack str]
+keyPat (AKey i) = [p| AKey $(litP $ integerL $ fromIntegral i) |]
+
+keyExp :: Key -> ExpQ
+keyExp (OKey str) =  [| OKey $(litE $ stringL $ T.unpack str) |]
+keyExp (AKey i) = [| AKey i |]
+                
+makeKey :: String -> Key
+makeKey str = case readMaybe str of
+  Nothing -> OKey $ T.pack str
+  Just i -> AKey i
+
+appendP :: [PatQ] -> PatQ -> PatQ
+appendP k end = foldr consP end k where
+  consP :: PatQ -> PatQ -> PatQ
+  consP x y = conP '(:) [x, y]
   
-makeKeyP :: String -> PatQ
-makeKeyP str = case readMaybe str of
-  Nothing -> [p| OKey $(litP $ StringL str) |]
-  Just i -> [p| AKey $(litP $ IntegerL i) |]
-
-makeKeyE :: String -> ExpQ
-makeKeyE str = case readMaybe str of
-  Nothing -> [| OKey $(litE $ StringL str) |]
-  Just i -> [| AKey $(litE $ IntegerL i) |]
-
 select :: [a] -> [([a], a, [a])]
 select [] = []
-select l = zip3 (inits l) l (tail $ tails l)
+select l@(_:lt) = zip3 (inits l) l (tails lt)
 
 appListE :: ExpQ -> [ExpQ] -> ExpQ
 appListE = foldl appE
@@ -99,119 +93,124 @@ appListE = foldl appE
 invalidMatch :: MatchQ
 invalidMatch = match wildP (normalB [| Error "Invalid path" |]) []
 
-makePosCases :: Name -> [Exp] -> Name -> [Name] -> ExpQ
-makePosCases pathVar prefix consName vs = do
+-- create matches for positional fields
+makePosCases :: Name -> [Key] -> Name -> Int -> MatchQ
+makePosCases pathVar prefix consName nFields = do
+  vs <- replicateM nFields $ newName "var"
   v2 <- newName "var"
   subPath <- newName "path"
   let mkPosMatch :: ([Name], Name, [Name]) -> Integer -> MatchQ
       mkPosMatch (p, v, n) i =
         match ([p| (AKey $(litP $ integerL i): $(varP subPath)) |])
-        (normalB [| pure [ $(listE $ (pure <$> prefix) ++ [
+        (normalB [| pure [ $(listE $ (keyExp <$> prefix) ++ [
                                 appE (conE 'AKey) (litE $ IntegerL i)])
                          , $(varE subPath)
-                         , GetSet $(varE v)
+                         , GetSetPure $(varE v)
                            $(lamE [varP v2] $
                              appListE (conE consName) $
                              varE <$> (p ++ v2 : n))
                          ] |])
         []
-  caseE (varE pathVar) $
-    zipWith mkPosMatch (select vs) [0..] ++ [invalidMatch]
+  match (conP consName $ map varP vs) 
+    (normalB $ caseE (varE pathVar) $
+     zipWith mkPosMatch (select vs) [0..] ++ [invalidMatch])
+    []
 
-makeRecCases :: Name -> [Exp] -> [String] -> [Name] -> Name -> ExpQ
-makeRecCases pathVar prefix recordFields vs consName = do
+-- create matches for record fields
+makeRecCases :: Name -> [Key] -> [String] -> Name -> MatchQ
+makeRecCases pathVar prefix recordFields consName = do
+  vs <- mapM (const $ newName "var") recordFields
   v2 <- newName "var"
   subPath <- newName "path"
   let mkRecMatch :: ([Name], Name, [Name]) -> String -> MatchQ
       mkRecMatch (p, v, n) fieldName =
-        match ([p| $(makeKeyP fieldName): $(varP subPath) |])
-        (normalB [| pure [ $(listE $ (pure <$> prefix) ++ [makeKeyE fieldName])
+        match ([p| $(keyPat $ makeKey fieldName): $(varP subPath) |])
+        (normalB [| pure [ $(listE $ (keyExp <$> prefix) ++
+                              [keyExp $ makeKey fieldName])
                          , $(varE subPath)
-                         , GetSet $(varE v)
+                         , GetSetPure $(varE v)
                            $(lamE [varP v2] $
                              appListE (conE consName) $
                              varE <$> (p ++ v2 : n))
                          ] |])
         []
-  caseE (varE pathVar) $
-    zipWith mkRecMatch (select vs) recordFields ++ [invalidMatch]
-
-makeSingleCase :: Name -> String -> Name -> Name -> ExpQ
-makeSingleCase pathVar prefix v consName = do
+  match (conP consName $ map varP vs)
+    (normalB $ caseE (varE pathVar) $
+     zipWith mkRecMatch (select vs) recordFields ++ [invalidMatch])
+    []
+    
+-- create a match for a single positional field
+makeSingleCase :: Name -> [Key] -> Name -> MatchQ
+makeSingleCase pathVar prefix consName = do
+  v <- newName "var"
   v2 <- newName "var"
   subPath <- newName "path"
-  caseE (varE pathVar)
-    [ match (conP '(:) [makeKeyP prefix, varP subPath])
-      (normalB [| pure ( [ $(makeKeyE prefix) ]
-                       , $(varE subPath)
-                       , GetSet $(varE v)
-                         $(lamE [varP v2] $
-                           appE (conE consName) $
-                           varE v2)) |])
-      []
-    , invalidMatch]
+  match (conP consName [varP v])
+    (normalB $ caseE (varE pathVar)
+     [ match (appendP (map keyPat prefix) (varP subPath))
+       (normalB [| pure ( $(listE $ map keyExp prefix)
+                        , $(varE subPath)
+                        , GetSetPure $(varE v)
+                          $(lamE [varP v2] $
+                            appE (conE consName) $
+                            varE v2)) |])
+       []
+     , invalidMatch])
+    []
 
 makePathLens :: Options -> Name -> Q (Name, Dec)
 makePathLens options name = do
   typeInfo <- reifyDatatype name
   funName <- newName "pathLens"
-  _
-{-
+  struc <- newName "struc"
+  pathVar <- newName "path"
+  let nConstructors = length $ datatypeCons typeInfo
+      isTaggedObject = case sumEncoding options of
+        TaggedObject _ _ -> True
+        _ -> False
 
- Single Constructor, tagSingleConstructors == False:
+      makeCase :: ConstructorInfo -> Maybe MatchQ
+      makeCase consInfo =
+        let prefix
+              | (nConstructors == 1) &&
+                not (tagSingleConstructors options) = []
+              | otherwise = case sumEncoding options of
+                  UntaggedValue -> []
+                  TaggedObject _ contentsName ->
+                    [makeKey contentsName]
+                  TwoElemArray -> [AKey 1]
+                  ObjectWithSingleField ->
+                    [makeKey $ constructorTagModifier options $
+                     nameBase $ constructorName consInfo]
+        in case constructorVariant consInfo of
+          RecordConstructor [] -> Nothing
+          RecordConstructor [_]
+            | unwrapUnaryRecords options &&
+              -- unwrapping is not done for taggedObject with multiple
+              -- constructors
+              (nConstructors == 1 || not isTaggedObject) ->
+                Just $ makeSingleCase pathVar prefix $
+                constructorName consInfo
+          RecordConstructor fieldNames ->
+            Just $ makeRecCases pathVar
+            -- fields are unpacked into the object with TaggedObject
+            (if isTaggedObject then [] else prefix)
+            (map (fieldLabelModifier options . nameBase) fieldNames) $
+            constructorName consInfo
+          _ -> case length $ constructorFields consInfo of
+                 0 -> Nothing
+                 1 -> Just $ makeSingleCase pathVar prefix $
+                      constructorName consInfo
+                 n -> Just $ makePosCases pathVar prefix
+                      (constructorName consInfo) n
 
- * No Field: []
- * One Field:  1
- * two Fields: [1, 2]
+      cases :: [MatchQ]
+      cases = mapMaybe makeCase (datatypeCons typeInfo)
 
- record:
- * Object ("one": 1, ... )
-
- Sumtype:
-  TaggedObject:
-    {"tagfieldName": Cons1, "contentsFieldName": [1, 2]}
-
-  UntaggedValue:
-    {contents}
-
-  ObjectWithSingleField:
-    {"Cons1": [1, 2]}
-
-  TwoElemArray:
-   ["Cons1", [1, 2]]
-  
- pathLens = \x path -> case x of
-    Field1 {a::_; b::_; c::_} -> case path of
-      (key:path)
-        | key == (OKey (fieldLabelModifier "a"):path) -> pure $ ([key], path, GetSet a (\a' -> Field1 a b c))
-        | key == (Okey "b":path) -> ...
-      _ -> Error "Invalid path"
-    Field2 a b c -> case path of
-      (contentsFieldName:key:path)
-       | key == (AKey 0) -> pure ([contentsFieldName, key], path, GetSet a (\a' -> Field1 a' b c))
-        
-      _ -> "invalid key"
-
- OneField a b c -> case path of
-      (AKey 0:path) -> ([AKey 0], path, GetSet a (\a' -> Field a' b c))
-      ...
-     _ -> "invalid key"
-
-    
-ObjectWithSingleField:
- fieldLens key x = case case x of
-    Field1 {a::_; b::_; c::_} -> case path of
-      (OKey constructorTagModifier "Field1": OKey (fieldLabelModifier "a"): path) ->
-         GetSet a (\a' -> Field1 a b c)
-      _ -> "invalid key: "
-    Field2 a b c
-      (constructorTagModifier "field2": OKey (fieldLabelModifier "Field2"): path) ->
-         GetSet (a, b, c) (\(a', b', c') -> Field2 a' b' c')
-      _ -> "invalid key"
- 
-    OneField a b c
-
-TwoElemArray:
-  
-  
--}
+      lensBody = case cases of
+        [] -> [| Error "Invalid Path" |]
+        _ -> caseE (varE struc) (cases ++ [invalidMatch])
+          
+  lensDescr <- funD funName [
+    clause [varP struc, varP pathVar] (normalB lensBody) []]
+  pure (funName, lensDescr)
