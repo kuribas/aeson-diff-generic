@@ -1,4 +1,5 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf, ExistentialQuantification #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
+  ExistentialQuantification #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Data.Aeson.Diff.Generic.Instances
   () where
@@ -41,7 +42,6 @@ import Data.Hashable
 import Data.Proxy
 import Data.Tagged
 import Unsafe.Coerce
-import Language.Haskell.TH
 import Data.Aeson.Diff.Generic.Types
 
 instance JsonPatch Bool
@@ -76,10 +76,14 @@ instance JsonPatch DiffTime
 instance JsonPatch Day
 instance JsonPatch UUID
 instance JsonPatch DotNetTime
-instance (Eq a, FromJSON a, Typeable a, ToJSON a) => JsonPatch (Data.DList.DList a)
-instance (Hashable a, Eq a, FromJSON a, Typeable a, ToJSON a) => JsonPatch (HashSet.HashSet a)
-instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  => JsonPatch (Ratio a)
-instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) => JsonPatch (Fixed a)
+instance (Eq a, FromJSON a, Typeable a, ToJSON a) =>
+         JsonPatch (Data.DList.DList a)
+instance (Hashable a, Eq a, FromJSON a, Typeable a, ToJSON a) =>
+         JsonPatch (HashSet.HashSet a)
+instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  =>
+         JsonPatch (Ratio a)
+instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) =>
+         JsonPatch (Fixed a)
 instance (Typeable a) => JsonPatch (Proxy a)
 instance (FieldLens a) => JsonPatch (Min a)
 instance FieldLens a => JsonPatch (Max a)
@@ -127,10 +131,14 @@ instance FieldLens DiffTime
 instance FieldLens Day
 instance FieldLens UUID
 instance FieldLens DotNetTime
-instance (Eq a, FromJSON a, Typeable a, ToJSON a) => FieldLens (Data.DList.DList a)
-instance (Hashable a, Eq a, FromJSON a, Typeable a, ToJSON a) => FieldLens (HashSet.HashSet a)
-instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  => FieldLens (Ratio a)
-instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) => FieldLens (Fixed a)
+instance (Eq a, FromJSON a, Typeable a, ToJSON a) =>
+         FieldLens (Data.DList.DList a)
+instance (Hashable a, Eq a, FromJSON a, Typeable a, ToJSON a) =>
+         FieldLens (HashSet.HashSet a)
+instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  =>
+         FieldLens (Ratio a)
+instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) =>
+         FieldLens (Fixed a)
 instance (Typeable a) => FieldLens (Proxy a)
 
 instance (FieldLens a) => FieldLens (Min a) where

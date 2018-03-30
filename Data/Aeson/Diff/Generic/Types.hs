@@ -23,13 +23,15 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => FieldLens s where
 
 class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
   getAtPointer :: Pointer -> s -> (forall v.JsonPatch v => v -> r) -> Result r
-  default getAtPointer :: FieldLens s => Pointer -> s -> (forall v.JsonPatch v => v -> r) -> Result r
+  default getAtPointer :: FieldLens s => Pointer -> s
+                       -> (forall v.JsonPatch v => v -> r) -> Result r
   getAtPointer (Pointer []) s f = pure $ f s
   getAtPointer (Pointer (key:path)) s f = do
     GetSet s2 _ <- fieldLens s key
     getAtPointer (Pointer path) s2 f
 
-  deleteAtPointer :: Pointer -> s -> (forall v.JsonPatch v => v -> r) -> Result (r, s)
+  deleteAtPointer :: Pointer -> s -> (forall v.JsonPatch v => v -> r)
+                  -> Result (r, s)
   default deleteAtPointer :: FieldLens s => Pointer -> s
                           -> (forall v.JsonPatch v => v -> r) -> Result (r, s)
   deleteAtPointer (Pointer []) _ _ = Error "Invalid pointer"
@@ -40,7 +42,8 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
 
   addAtPointer :: Pointer -> s -> r ->
                (forall v.JsonPatch v => r -> Result v) -> Result s
-  default addAtPointer :: FieldLens s => Pointer -> s -> r -> (forall v.JsonPatch v => r -> Result v) -> Result s
+  default addAtPointer :: FieldLens s => Pointer -> s -> r
+                       -> (forall v.JsonPatch v => r -> Result v) -> Result s
   addAtPointer (Pointer []) _ v f = f v
   addAtPointer (Pointer [key]) s val f =
     insertAt key s val f
@@ -73,7 +76,8 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
   replaceAtPointer :: Pointer -> s -> r ->
                       (forall v.JsonPatch v => r -> Result v) -> Result s
   default replaceAtPointer :: FieldLens s => Pointer -> s -> r
-                           ->  (forall v.JsonPatch v => r -> Result v) -> Result s
+                           -> (forall v.JsonPatch v => r -> Result v)
+                           -> Result s
   replaceAtPointer (Pointer []) _ v f = f v
   replaceAtPointer (Pointer [key]) s val f =
     setAtKey key s val f
@@ -103,13 +107,17 @@ getValueAtPointer p s = getAtPointer p s toJSON
 getDynamic ::(Typeable a) => Dynamic -> Result a
 getDynamic = maybe (Error "type mismatch") pure . fromDynamic
 
-updateAtKey :: FieldLens s => Key -> s -> (forall v.JsonPatch v => v -> Result v) -> Result s
+updateAtKey :: FieldLens s => Key -> s
+            -> (forall v.JsonPatch v => v -> Result v)
+            -> Result s
 updateAtKey key s f = do
   GetSet v setr <- fieldLens s key
   setr =<< f v
 {-# INLINE updateAtKey #-}
 
-setAtKey :: FieldLens s => Key -> s -> r -> (forall v.JsonPatch v => r -> Result v) -> Result s
+setAtKey :: FieldLens s => Key -> s -> r
+         -> (forall v.JsonPatch v => r -> Result v)
+         -> Result s
 setAtKey k s a f = updateAtKey k s $ const (f a)
 {-# INLINE setAtKey #-}
 
