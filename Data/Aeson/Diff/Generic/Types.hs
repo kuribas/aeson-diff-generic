@@ -125,23 +125,23 @@ getDynamicAtPointer :: JsonPatch s => Pointer -> s -> Result Dynamic
 getDynamicAtPointer p s = getAtPointer p s toDyn
 {-# INLINE getDynamicAtPointer #-}  
 
-newtypeFieldLens :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
+wrapperFieldLens :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
                  -> Key -> w -> Result (GetSet w)
-newtypeFieldLens wrap unwrap key el = do
+wrapperFieldLens wrap unwrap key el = do
   GetSet v setr <- fieldLens key (unwrap el)
   pure $ GetSet v (fmap wrap . setr)
-{-# INLINE newtypeFieldLens #-}
+{-# INLINE wrapperFieldLens #-}
   
-newtypeInsertAt :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
+wrapperInsertAt :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
                 -> Key -> w -> r ->  (forall v.(JsonPatch v) => r -> Result v)
                 -> Result w
-newtypeInsertAt wrap unwrap key el r f = 
+wrapperInsertAt wrap unwrap key el r f = 
   wrap <$> insertAt key (unwrap el) r f
-{-# INLINE newtypeInsertAt #-}  
+{-# INLINE wrapperInsertAt #-}  
 
-newtypeDeleteAt :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
+wrapperDeleteAt :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
                 -> Key -> w -> (forall v.(JsonPatch v) => v -> r)
                 -> Result (r, w)
-newtypeDeleteAt wrap unwrap key el f = 
+wrapperDeleteAt wrap unwrap key el f = 
   fmap wrap <$> deleteAt key (unwrap el) f
-{-# INLINE newtypeDeleteAt #-}    
+{-# INLINE wrapperDeleteAt #-}    

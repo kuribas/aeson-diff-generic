@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
-  ExistentialQuantification #-}
+  ExistentialQuantification, TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Data.Aeson.Diff.Generic.Instances
   () where
@@ -43,6 +43,7 @@ import Data.Proxy
 import Data.Tagged
 import Unsafe.Coerce
 import Data.Aeson.Diff.Generic.Types
+import Data.Aeson.Diff.Generic.TH
 
 instance JsonPatch Bool
 instance JsonPatch Char
@@ -76,28 +77,13 @@ instance JsonPatch DiffTime
 instance JsonPatch Day
 instance JsonPatch UUID
 instance JsonPatch DotNetTime
-instance (Eq a, FromJSON a, Typeable a, ToJSON a) =>
-         JsonPatch (Data.DList.DList a)
+-- no indexing possible into hashset, since it is unordered.
 instance (Hashable a, Eq a, FromJSON a, Typeable a, ToJSON a) =>
          JsonPatch (HashSet.HashSet a)
 instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  =>
          JsonPatch (Ratio a)
 instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) =>
          JsonPatch (Fixed a)
-instance (Typeable a) => JsonPatch (Proxy a)
-instance (FieldLens a) => JsonPatch (Min a)
-instance FieldLens a => JsonPatch (Max a)
-instance FieldLens a => JsonPatch (First a)
-instance FieldLens a => JsonPatch (Last a)
-instance FieldLens a => JsonPatch (WrappedMonoid a)
-instance (FieldLens a, JsonPatch a) => JsonPatch (Option a)
-instance FieldLens a => JsonPatch (Identity a)
-instance FieldLens a => JsonPatch (Dual a)
-instance (FieldLens b, Typeable a) => JsonPatch (Tagged a b)
-instance (JsonPatch a, JsonPatch b) => JsonPatch (Either a b)
-instance JsonPatch a => JsonPatch (Data.List.NonEmpty.NonEmpty a)
-instance JsonPatch a => JsonPatch (Maybe a)
-instance (JsonPatch a, JsonPatch b) => JsonPatch (a, b)
 
 instance FieldLens Bool
 instance FieldLens Char
@@ -131,62 +117,54 @@ instance FieldLens DiffTime
 instance FieldLens Day
 instance FieldLens UUID
 instance FieldLens DotNetTime
-instance (Eq a, FromJSON a, Typeable a, ToJSON a) =>
-         FieldLens (Data.DList.DList a)
 instance (Hashable a, Eq a, FromJSON a, Typeable a, ToJSON a) =>
          FieldLens (HashSet.HashSet a)
 instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  =>
          FieldLens (Ratio a)
 instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) =>
          FieldLens (Fixed a)
-instance (Typeable a) => FieldLens (Proxy a)
 
-instance (FieldLens a) => FieldLens (Min a) where
-  fieldLens = newtypeFieldLens Min getMin
-  insertAt = newtypeInsertAt Min getMin
-  deleteAt = newtypeDeleteAt Min getMin
+deriveJsonPatch (defaultOptions {sumEncoding = ObjectWithSingleField}) ''Either
+deriveJsonPatch (defaultOptions {sumEncoding = UntaggedValue}) ''Maybe
+deriveJsonPatch defaultOptions ''(,)
+deriveJsonPatch defaultOptions ''(,,)
+deriveJsonPatch defaultOptions ''(,,,)
+deriveJsonPatch defaultOptions ''(,,,,)
+deriveJsonPatch defaultOptions ''(,,,,,)
+deriveJsonPatch defaultOptions ''(,,,,,,)
+deriveJsonPatch defaultOptions ''(,,,,,,,)
+deriveJsonPatch defaultOptions ''(,,,,,,,,)
+deriveJsonPatch defaultOptions ''(,,,,,,,,,)
+deriveJsonPatch defaultOptions ''(,,,,,,,,,,)
+deriveJsonPatch defaultOptions ''(,,,,,,,,,,,)
+deriveJsonPatch defaultOptions ''(,,,,,,,,,,,,)
+deriveJsonPatch defaultOptions ''(,,,,,,,,,,,,,)
+deriveJsonPatch defaultOptions ''(,,,,,,,,,,,,,,)
 
-instance FieldLens a => FieldLens (Max a) where
-  fieldLens = newtypeFieldLens Max getMax
-  insertAt = newtypeInsertAt Max getMax
-  deleteAt = newtypeDeleteAt Max getMax
-
-instance FieldLens a => FieldLens (First a) where
-  fieldLens = newtypeFieldLens First getFirst
-  insertAt = newtypeInsertAt First getFirst
-  deleteAt = newtypeDeleteAt First getFirst
-
-instance FieldLens a => FieldLens (Last a) where
-  fieldLens = newtypeFieldLens Last getLast
-  insertAt = newtypeInsertAt Last getLast
-  deleteAt = newtypeDeleteAt Last getLast
-
-instance FieldLens a => FieldLens (WrappedMonoid a) where
-  fieldLens = newtypeFieldLens WrapMonoid unwrapMonoid
-  insertAt = newtypeInsertAt WrapMonoid unwrapMonoid
-  deleteAt = newtypeDeleteAt WrapMonoid unwrapMonoid
-
-instance (FieldLens a, JsonPatch a) => FieldLens (Option a) where
-  fieldLens = newtypeFieldLens Option getOption
-  insertAt = newtypeInsertAt Option getOption
-  deleteAt = newtypeDeleteAt Option getOption
-
-instance FieldLens a => FieldLens (Identity a) where
-  fieldLens = newtypeFieldLens Identity runIdentity
-  insertAt = newtypeInsertAt Identity runIdentity
-  deleteAt = newtypeDeleteAt Identity runIdentity
-
-instance FieldLens a => FieldLens (Dual a) where
-  fieldLens = newtypeFieldLens Dual getDual
-  insertAt = newtypeInsertAt Dual getDual
-  deleteAt = newtypeDeleteAt Dual getDual
+deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Proxy
+deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Min
+deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Max
+deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''First
+deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Last
+deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''WrappedMonoid
+deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Option
+deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Identity
+deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Dual
+--deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Sum
+--deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Product
+-- instance FieldLens Compose
 
 instance (FieldLens b, Typeable a) => FieldLens (Tagged a b) where
-  fieldLens = newtypeFieldLens Tagged unTagged
-  insertAt = newtypeInsertAt Tagged unTagged
-  deleteAt = newtypeDeleteAt Tagged unTagged
+  fieldLens = wrapperFieldLens Tagged unTagged
+  insertAt = wrapperInsertAt Tagged unTagged
+  deleteAt = wrapperDeleteAt Tagged unTagged
 
-
+instance JsonPatch a => JsonPatch (Data.DList.DList a)
+instance JsonPatch a => FieldLens (Data.DList.DList a) where
+  fieldLens = wrapperFieldLens Data.DList.fromList Data.DList.toList
+  insertAt = wrapperInsertAt Data.DList.fromList Data.DList.toList
+  deleteAt = wrapperDeleteAt Data.DList.fromList Data.DList.toList
+  
 intKey :: Key -> Result Int
 intKey (OKey _) = Error "expected Array Key."
 intKey (AKey i) = pure i
@@ -198,16 +176,8 @@ strKey (AKey i) = T.pack $ show i
 isEndKey :: Key -> Bool
 isEndKey = (== OKey "-")
 
-instance (JsonPatch a, JsonPatch b) => FieldLens (Either a b)
 instance JsonPatch a => FieldLens (Data.List.NonEmpty.NonEmpty a)
-instance JsonPatch a => FieldLens (Maybe a)
-
-instance (JsonPatch a, JsonPatch b) => FieldLens (a, b)
--- instance FieldLens (Map a)
 -- instance FieldLens (Tree a)
--- instance FieldLens Product
--- instance FieldLens Sum
--- instance FieldLens Compose
 
 splitList :: Int -> [a] -> Maybe ([a], [a])
 splitList i _ | i < 0 = Nothing
@@ -216,6 +186,8 @@ splitList _ [] = Nothing
 splitList n (x:xs) = do
   (l, r) <- splitList (n-1) xs
   pure (x:l, r)
+
+instance JsonPatch a => JsonPatch (Data.List.NonEmpty.NonEmpty a)
 
 instance JsonPatch a => JsonPatch [a]
 instance JsonPatch a => FieldLens [a] where
