@@ -10,7 +10,7 @@ import Control.Monad
 data GetSet s = forall v. JsonPatch v => GetSet v (v -> Result s)
 
 class (Eq s, ToJSON s, FromJSON s, Typeable s) => FieldLens s where
-  fieldLens :: s -> Key -> Result (GetSet s)
+  fieldLens :: Key -> s -> Result (GetSet s)
   fieldLens _ _ = Error "Invalid pointer"
 
   deleteAt :: Key -> s -> (forall v.(JsonPatch v) => v -> r)
@@ -27,7 +27,7 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
                        -> (forall v.JsonPatch v => v -> r) -> Result r
   getAtPointer (Pointer []) s f = pure $ f s
   getAtPointer (Pointer (key:path)) s f = do
-    GetSet s2 _ <- fieldLens s key
+    GetSet s2 _ <- fieldLens key s
     getAtPointer (Pointer path) s2 f
 
   deleteAtPointer :: Pointer -> s -> (forall v.JsonPatch v => v -> r)
@@ -37,7 +37,7 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
   deleteAtPointer (Pointer []) _ _ = Error "Invalid pointer"
   deleteAtPointer (Pointer [key]) s f = deleteAt key s f
   deleteAtPointer (Pointer (key:path)) s f = do
-    GetSet v setr <- fieldLens s key
+    GetSet v setr <- fieldLens key s
     join $ traverse setr <$> deleteAtPointer (Pointer path) v f
 
   addAtPointer :: Pointer -> s -> r ->
@@ -111,7 +111,7 @@ updateAtKey :: FieldLens s => Key -> s
             -> (forall v.JsonPatch v => v -> Result v)
             -> Result s
 updateAtKey key s f = do
-  GetSet v setr <- fieldLens s key
+  GetSet v setr <- fieldLens key s
   setr =<< f v
 {-# INLINE updateAtKey #-}
 
@@ -126,9 +126,9 @@ getDynamicAtPointer p s = getAtPointer p s toDyn
 {-# INLINE getDynamicAtPointer #-}  
 
 newtypeFieldLens :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
-                 -> w -> Key -> Result (GetSet w)
-newtypeFieldLens wrap unwrap el key = do
-  GetSet v setr <- fieldLens (unwrap el) key
+                 -> Key -> w -> Result (GetSet w)
+newtypeFieldLens wrap unwrap key el = do
+  GetSet v setr <- fieldLens key (unwrap el)
   pure $ GetSet v (fmap wrap . setr)
 {-# INLINE newtypeFieldLens #-}
   

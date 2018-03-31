@@ -219,7 +219,7 @@ splitList n (x:xs) = do
 
 instance JsonPatch a => JsonPatch [a]
 instance JsonPatch a => FieldLens [a] where
-  fieldLens lst key = do
+  fieldLens key lst = do
     i <- intKey key
     case splitList i lst of
       Just (l, r1:rs) ->
@@ -242,7 +242,7 @@ instance JsonPatch a => FieldLens [a] where
 
 instance (Ord a, JsonPatch a) => JsonPatch (Set.Set a) 
 instance (Ord a, JsonPatch a) => FieldLens (Set.Set a) where
-  fieldLens st key = do
+  fieldLens key st = do
     i <- intKey key
     when (i < 0 || i >= Set.size st) $
       Error "Index out of bounds"
@@ -267,7 +267,7 @@ instance (Ord a, JsonPatch a) => FieldLens (Set.Set a) where
 
 instance (Ord a, JsonPatch a) => JsonPatch (Seq.Seq a) where
 instance (Ord a, JsonPatch a) => FieldLens (Seq.Seq a) where
-  fieldLens sq key = do
+  fieldLens key sq = do
     i <- intKey key
     case Seq.lookup i sq of
       Nothing -> Error "Index out of bounds"
@@ -289,7 +289,7 @@ instance (Ord a, JsonPatch a) => FieldLens (Seq.Seq a) where
   {-# INLINE deleteAt #-}
 
 instance (JsonPatch a) => FieldLens (Vector.Vector a) where
-  fieldLens v key = do
+  fieldLens key v = do
     i <- intKey key
     when (i < 0 || i >= Vector.length v) $
       Error "Index out of bounds"
@@ -317,7 +317,7 @@ instance (JsonPatch a) => FieldLens (Vector.Vector a) where
 
 instance (UVector.Unbox a, JsonPatch a) => JsonPatch (UVector.Vector a)
 instance (UVector.Unbox a, JsonPatch a) => FieldLens (UVector.Vector a) where
-  fieldLens v key = do
+  fieldLens key v = do
     i <- intKey key
     when (i < 0 || i >= UVector.length v) $
       Error "Index out of bounds"
@@ -344,7 +344,7 @@ instance (UVector.Unbox a, JsonPatch a) => FieldLens (UVector.Vector a) where
 
 instance (SVector.Storable a, JsonPatch a) => JsonPatch (SVector.Vector a) 
 instance (SVector.Storable a, JsonPatch a) => FieldLens (SVector.Vector a) where
-  fieldLens v key = do
+  fieldLens key v = do
     i <- intKey key
     when (i < 0 || i >= SVector.length v) $
       Error "Index out of bounds"
@@ -371,7 +371,7 @@ instance (SVector.Storable a, JsonPatch a) => FieldLens (SVector.Vector a) where
 
 instance (PVector.Prim a, JsonPatch a) => JsonPatch (PVector.Vector a) 
 instance (PVector.Prim a, JsonPatch a) => FieldLens (PVector.Vector a) where
-  fieldLens v key = do
+  fieldLens key v = do
     i <- intKey key
     when (i < 0 || i >= PVector.length v) $
       Error "Index out of bounds"
@@ -412,7 +412,7 @@ instance (ToJSONKey k, Typeable k, Eq k, Hashable k, FromJSONKey k, JsonPatch a)
          => JsonPatch (HashMap.HashMap k a)
 instance (ToJSONKey k, Typeable k, Eq k, Hashable k, FromJSONKey k, JsonPatch a)
          => FieldLens (HashMap.HashMap k a) where
-  fieldLens hm key = do
+  fieldLens key hm = do
     k <- getHashMapKey key
     case HashMap.lookup k hm of
       Nothing -> Error "Invalid Pointer"
@@ -434,7 +434,7 @@ instance (FromJSONKey k, ToJSONKey k, Eq k, Ord k, JsonPatch k, JsonPatch a)
          => JsonPatch (Map.Map k a)
 instance (FromJSONKey k, ToJSONKey k, Eq k, Ord k, JsonPatch a, JsonPatch k)
          => FieldLens (Map.Map k a) where
-  fieldLens map1 key = do
+  fieldLens key map1 = do
     k <- getMapKey $ strKey key
     case k of
       Nothing -> do

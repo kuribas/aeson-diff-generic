@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
-ExistentialQuantification, TemplateHaskell #-}
+    ExistentialQuantification, TemplateHaskell #-}
 module Data.Aeson.Diff.Generic.TH
   where
 
@@ -76,7 +76,7 @@ deleteAtPointerTH l1 l2 (Pointer path) s f =
   (do GetSetMaybe v setr <- l2 s path
       if isNothing v
         then Error "fallthrough"
-        else pure $ (f v, setr Nothing)) <|>
+        else pure (f v, setr Nothing)) <|>
   (do (_, subPath, GetSetPure _ x setr) <- l1 s path
       fmap setr <$> deleteAtPointer (Pointer subPath) x f)
       
@@ -91,12 +91,24 @@ testAtPointerTH l (Pointer path) s val f = do
   _ <- testAtPointer (Pointer subPath) x val f
   pure s
 
-keyPat :: Key -> PatQ
-keyPat (OKey str) = conP 'OKey [litP $ stringL $ T.unpack str]
-keyPat (AKey i) = [p| AKey $(litP $ integerL $ fromIntegral i) |]
+-- match against the key and the rest of the list
+matchKey :: Key -> PatQ -> ExpQ -> MatchQ
+matchKey (OKey str) rest e = do
+  strVar <- newName "str"
+  match (conP 'OKey [varP strVar] `consP` rest)
+    (guardedB [liftA2 (,)
+               (normalG [| $(varE strVar) ==
+                          T.pack $(litE $ stringL $ T.unpack str)
+                         |])
+                e])
+    []
+
+matchKey (AKey i) rest e =
+  match (conP 'AKey [litP $ integerL $ fromIntegral i] `consP` rest)
+  (normalB e) []
 
 keyExp :: Key -> ExpQ
-keyExp (OKey str) =  [| OKey $(litE $ stringL $ T.unpack str) |]
+keyExp (OKey str) =  [| OKey $ T.pack $(litE $ stringL $ T.unpack str) |]
 keyExp (AKey i) = [| AKey i |]
                 
 makeKey :: String -> Key
@@ -104,10 +116,11 @@ makeKey str = case readMaybe str of
   Nothing -> OKey $ T.pack str
   Just i -> AKey i
 
+consP :: PatQ -> PatQ -> PatQ
+consP x y = conP '(:) [x, y]
+
 appendP :: [PatQ] -> PatQ -> PatQ
-appendP k end = foldr consP end k where
-  consP :: PatQ -> PatQ -> PatQ
-  consP x y = conP '(:) [x, y]
+appendP k end = foldr consP end k
   
 select :: [a] -> [([a], a, [a])]
 select [] = []
@@ -120,49 +133,65 @@ invalidMatch :: MatchQ
 invalidMatch = match wildP (normalB [| Error "Invalid path" |]) []
 
 -- create matches for positional fields
-makePosCases :: Name -> [Key] -> Name -> Int -> MatchQ
+makePosCases :: Name -> Maybe Key -> Name -> Int -> MatchQ
 makePosCases pathVar prefix consName nFields = do
   vs <- replicateM nFields $ newName "var"
   v2 <- newName "var"
   subPath <- newName "path"
   let mkPosMatch :: ([Name], Name, [Name]) -> Integer -> MatchQ
       mkPosMatch (p, v, n) i =
-        match ([p| (AKey $(litP $ integerL i): $(varP subPath)) |])
-        (normalB [| pure ( $(listE $ (keyExp <$> prefix) ++ [
-                                appE (conE 'AKey) (litE $ IntegerL i)])
-                         , $(varE subPath)
-                         , GetSetPure False $(varE v)
-                           $(lamE [varP v2] $
-                             appListE (conE consName) $
-                            varE <$> (p ++ v2 : n))
-                         ) |])
-        []
-  match (conP consName $ map varP vs) 
-    (normalB $ caseE (varE pathVar) $
-     zipWith mkPosMatch (select vs) [0..] ++ [invalidMatch])
+        matchKey (AKey $ fromIntegral i) (varP subPath)
+        [| pure ( $(listE $ maybeToList (keyExp <$> prefix) ++ [
+                       appE (conE 'AKey) (litE $ IntegerL i)])
+                , $(varE subPath)
+                , GetSetPure False $(varE v)
+                  $(lamE [varP v2] $
+                    appListE (conE consName) $
+                    varE <$> (p ++ v2 : n))
+                )
+         |]
+      casePrefix f = case prefix of
+        Nothing -> f pathVar 
+        Just key -> do
+          subPathVar <- newName "subPath"
+          caseE (varE pathVar)
+            [matchKey key (varP subPathVar) (f subPathVar), invalidMatch]
+
+  match (conP consName $ map varP vs)
+    (normalB $ casePrefix $ \subPathVar ->
+        caseE (varE subPathVar) $
+        zipWith mkPosMatch (select vs) [0..] ++ [invalidMatch] )
     []
 
 -- create matches for record fields
-makeRecCases :: Name -> [Key] -> [String] -> Name -> MatchQ
+makeRecCases :: Name -> Maybe Key -> [String] -> Name -> MatchQ
 makeRecCases pathVar prefix recordFields consName = do
   vs <- mapM (const $ newName "var") recordFields
   v2 <- newName "var"
   subPath <- newName "path"
   let mkRecMatch :: ([Name], Name, [Name]) -> String -> MatchQ
       mkRecMatch (p, v, n) fieldName =
-        match ([p| $(keyPat $ makeKey fieldName): $(varP subPath) |])
-        (normalB [| pure ( $(listE $ (keyExp <$> prefix) ++
-                              [keyExp $ makeKey fieldName])
-                         , $(varE subPath)
-                         , GetSetPure True $(varE v)
-                           $(lamE [varP v2] $
-                             appListE (conE consName) $
-                             varE <$> (p ++ v2 : n))
-                         ) |])
-        []
+        matchKey (makeKey fieldName) (varP subPath)
+        [| pure ( $(listE $ maybeToList (keyExp <$> prefix) ++
+                    [keyExp $ makeKey fieldName])
+                , $(varE subPath)
+                , GetSetPure True $(varE v)
+                  $(lamE [varP v2] $
+                    appListE (conE consName) $
+                    varE <$> (p ++ v2 : n))
+                )
+         |]
+      casePrefix f = case prefix of
+        Nothing -> f pathVar 
+        Just key -> do
+          subPathVar <- newName "subPath"
+          caseE (varE pathVar)
+            [matchKey key (varP subPathVar) (f subPathVar), invalidMatch]
+
   match (conP consName $ map varP vs)
-    (normalB $ caseE (varE pathVar) $
-     zipWith mkRecMatch (select vs) recordFields ++ [invalidMatch])
+    (normalB $ casePrefix $ \subPathVar ->
+        caseE (varE subPathVar) $
+        zipWith mkRecMatch (select vs) recordFields ++ [invalidMatch])
     []
 
 isMaybe :: Type -> Bool
@@ -173,9 +202,15 @@ getMaybeVars :: [Type] -> [Name] -> [([Name], Name, [Name])]
 getMaybeVars types vars =
   map snd $ filter (isMaybe . fst) $
   zip types $ select vars
+
+makePathLensName :: String -> String -> String
+makePathLensName prefix ('(':r)
+  | (n, ")") <- span (== ',') r = 
+      prefix ++ "Tuple" ++ show (length n)
+makePathLensName prefix s = prefix ++ s
  
 -- create matches for record fields
-makeMaybeRecCases :: Name -> [Key] -> [String] -> [Type] -> Name -> Maybe MatchQ
+makeMaybeRecCases :: Name -> Maybe Key -> [String] -> [Type] -> Name -> Maybe MatchQ
 makeMaybeRecCases _ _ _ types _
   | not $ any isMaybe types = Nothing
 makeMaybeRecCases pathVar prefix recordFields types consName = Just $ do
@@ -183,46 +218,73 @@ makeMaybeRecCases pathVar prefix recordFields types consName = Just $ do
   v2 <- newName "var"
   let mkRecMatch :: ([Name], Name, [Name]) -> String -> MatchQ
       mkRecMatch (p, v, n) fieldName =
-        match (listP $ [keyPat $ makeKey fieldName])
-        (normalB [| pure ( GetSetMaybe $(varE v)
-                           $(lamE [varP v2] $
-                             appListE (conE consName) $
-                             varE <$> (p ++ v2 : n))
-                         ) |])
-        []
+        matchKey (makeKey fieldName) (listP [])
+        [| pure ( GetSetMaybe $(varE v)
+                  $(lamE [varP v2] $
+                    appListE (conE consName) $
+                    varE <$> (p ++ v2 : n))
+                ) |]
+      casePrefix f = case prefix of
+        Nothing -> f pathVar 
+        Just key -> do
+          subPathVar <- newName "subPath"
+          caseE (varE pathVar)
+            [matchKey key (varP subPathVar) (f subPathVar), invalidMatch]
+
   match (conP consName $ map varP vs)
-    (normalB $ caseE (varE pathVar) $
+    (normalB $ casePrefix $ \subPathVar ->
+        caseE (varE subPathVar) $
      zipWith mkRecMatch (getMaybeVars types vs) recordFields ++ [invalidMatch])
     []
 
-    
 -- create a match for a single positional field
-makeSingleCase :: Name -> [Key] -> Name -> MatchQ
+makeSingleCase :: Name -> Maybe Key -> Name -> MatchQ
 makeSingleCase pathVar prefix consName = do
   v <- newName "var"
   v2 <- newName "var"
   subPath <- newName "path"
   match (conP consName [varP v])
-    (normalB $ caseE (varE pathVar)
-     [ match (appendP (map keyPat prefix) (varP subPath))
-       (normalB [| pure ( $(listE $ map keyExp prefix)
-                        , $(varE subPath)
-                        , GetSetPure False $(varE v)
-                          $(lamE [varP v2] $
-                            appE (conE consName) $
-                            varE v2)) |])
-       []
-     , invalidMatch])
-    []
+    (normalB $ case prefix of
+         Nothing ->
+           [| pure ( $(listE [])
+                   , $(varE subPath)
+                   , GetSetPure False $(varE v)
+                     $(lamE [varP v2] $
+                       appE (conE consName) $
+                       varE v2)) |]
+         Just key ->
+           caseE (varE pathVar) [
+           matchKey key (varP subPath)
+             [| pure ( $(listE [keyExp key])
+                     , $(varE subPath)
+                     , GetSetPure False $(varE v)
+                       $(lamE [varP v2] $
+                         appE (conE consName) $
+                         varE v2)) |]
+           , invalidMatch]
+    ) []
 
-declarePathLens :: Options -> Name -> DecsQ
-declarePathLens options name =
-  (:[]) . snd <$> makePathLens options name
+deriveJsonPatch :: Options -> Name -> DecsQ
+deriveJsonPatch options name = do
+  (pathLensName, pathLensDecls) <- makePathLens options name
+  (mbLensName, mbLensDecls) <- makeMaybeLens options name
+  classDecl <- InstanceD _ _ _ <$> [d|
+    getAtPointer = getAtPointerTH $(varE pathLensName)
+    deleteAtPointer = deleteAtPointerTH $(varE pathLensName)
+                      $(varE mbLensName)
+    addAtPointer = addAtPointerTH $(varE pathLensName)
+    movePath = movePathTH $(varE pathLensName)
+    copyPath = copyPathTH $(varE pathLensName)
+    replaceAtPointer = replaceAtPointerTH $(varE pathLensName)
+    testAtPointer = testAtPointerTH $(varE pathLensName)
+    |]
+  pure $ pathLensDecls : mbLensDecls : classDecl : []
 
 makePathLens :: Options -> Name -> Q (Name, Dec)
 makePathLens options name = do
   typeInfo <- reifyDatatype name
-  funName <- newName "pathLens"
+  let funName = mkName $ makePathLensName "generatedPathLensFor" $
+                nameBase name
   struc <- newName "struc"
   pathVar <- newName "path"
   let nConstructors = length $ datatypeCons typeInfo
@@ -234,15 +296,15 @@ makePathLens options name = do
       makeCase consInfo =
         let prefix
               | (nConstructors == 1) &&
-                not (tagSingleConstructors options) = []
+                not (tagSingleConstructors options) = Nothing
               | otherwise = case sumEncoding options of
-                  UntaggedValue -> []
+                  UntaggedValue -> Nothing
                   TaggedObject _ contentsName ->
-                    [makeKey contentsName]
-                  TwoElemArray -> [AKey 1]
+                    Just $ makeKey contentsName
+                  TwoElemArray -> Just $ AKey 1
                   ObjectWithSingleField ->
-                    [makeKey $ constructorTagModifier options $
-                     nameBase $ constructorName consInfo]
+                    Just $ makeKey $ constructorTagModifier options $
+                    nameBase $ constructorName consInfo
         in case constructorVariant consInfo of
           RecordConstructor [] -> Nothing
           RecordConstructor [_]
@@ -255,7 +317,7 @@ makePathLens options name = do
           RecordConstructor fieldNames ->
             Just $ makeRecCases pathVar
             -- fields are unpacked into the object with TaggedObject
-            (if isTaggedObject then [] else prefix)
+            (if isTaggedObject then Nothing else prefix)
             (map (fieldLabelModifier options . nameBase) fieldNames) $
             constructorName consInfo
           _ -> case length $ constructorFields consInfo of
@@ -270,17 +332,20 @@ makePathLens options name = do
 
       lensBody = case cases of
         [] -> [| Error "Invalid Path" |]
-        _ -> caseE (varE struc) (cases ++ [invalidMatch])
+        _ -> caseE (varE struc) $
+             cases ++ if length cases == nConstructors
+                      then [] else  [invalidMatch]
           
-  lensDescr <- funD funName [
+  lensDecl <- funD funName [
     clause [varP struc, varP pathVar] (normalB lensBody) []]
-  pure (funName, lensDescr)
+  pure (funName, lensDecl)
 
 -- return a lens that only works on maybe fields.  Ugh, so much duplication...
 makeMaybeLens :: Options -> Name -> Q (Name, Dec)
 makeMaybeLens options name = do
   typeInfo <- reifyDatatype name
-  funName <- newName "pathLens"
+  let funName = mkName $ makePathLensName "generatedMaybePathLensFor" $
+                nameBase name
   struc <- newName "struc"
   pathVar <- newName "path"
   let nConstructors = length $ datatypeCons typeInfo
@@ -292,15 +357,15 @@ makeMaybeLens options name = do
       makeCase consInfo =
         let prefix
               | (nConstructors == 1) &&
-                not (tagSingleConstructors options) = []
+                not (tagSingleConstructors options) = Nothing
               | otherwise = case sumEncoding options of
-                  UntaggedValue -> []
+                  UntaggedValue -> Nothing
                   TaggedObject _ contentsName ->
-                    [makeKey contentsName]
-                  TwoElemArray -> [AKey 1]
+                    Just $ makeKey contentsName
+                  TwoElemArray -> Just $ AKey 1
                   ObjectWithSingleField ->
-                    [makeKey $ constructorTagModifier options $
-                     nameBase $ constructorName consInfo]
+                    Just $ makeKey $ constructorTagModifier options $
+                     nameBase $ constructorName consInfo
         in case constructorVariant consInfo of
           RecordConstructor [] -> Nothing
           RecordConstructor [_]
@@ -313,7 +378,7 @@ makeMaybeLens options name = do
             if omitNothingFields options then 
               makeMaybeRecCases pathVar
               -- fields are unpacked into the object with TaggedObject
-              (if isTaggedObject then [] else prefix)
+              (if isTaggedObject then Nothing else prefix)
               (map (fieldLabelModifier options . nameBase) fieldNames)
               (constructorFields consInfo)
               (constructorName consInfo)
@@ -325,7 +390,9 @@ makeMaybeLens options name = do
 
       lensBody = case cases of
         [] -> [| Error "Invalid Path" |]
-        _ -> caseE (varE struc) (cases ++ [invalidMatch])
+        _ -> caseE (varE struc) $
+             cases ++ if length cases == nConstructors
+                      then [] else  [invalidMatch]
           
   lensDescr <- funD funName [
     clause [varP struc, varP pathVar] (normalB lensBody) []]
