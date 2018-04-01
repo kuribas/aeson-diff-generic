@@ -1,4 +1,4 @@
-Name:		json-diff-generic
+Name:		aeson-diff-generic
 Version: 	0.0.1
 Synopsis:	Apply a json-patch to any haskell datatype.
 Category: 	Graphics, Geometry, Typography
