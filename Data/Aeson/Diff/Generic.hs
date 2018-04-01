@@ -2,7 +2,7 @@
    ExistentialQuantification #-}
 module Data.Aeson.Diff.Generic
   (Data.Aeson.Diff.Generic.patch, applyOperation, JsonPatch(..),
-   getValueAtPointer, getDataAtPointer, GetSet(..), FieldLens(..)
+   getDynamic, getValueAtPointer, getDataAtPointer, GetSet(..), FieldLens(..)
   ) where
 
 import Data.Aeson.Types
@@ -14,11 +14,13 @@ import qualified Data.Text as T
 import Data.Aeson.Diff.Generic.Types
 import Data.Aeson.Diff.Generic.Instances()
 
+-- | Apply the json patch to the data.
 patch :: JsonPatch a => Patch -> a -> Result a
 patch = foldr (>=>) pure . map applyOperation . patchOperations
 {-# NOINLINE patch #-}
 {-# RULES "patch/Value" patch = Diff.patch #-} 
 
+-- | Apply a single operation to the data.
 applyOperation :: JsonPatch a => Operation -> a -> Result a
 applyOperation op v = case patchOp op v of
   Error msg -> Error $ opError op ++ msg
