@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
    ExistentialQuantification #-}
 module Data.Aeson.Diff.Generic
-  (Data.Aeson.Diff.Generic.patch, applyOperation, JsonPatch(..), getValueAtPointer,
-   newtypeFieldLens, newtypeInsertAt, newtypeDeleteAt, GetSet(..), FieldLens(..)
+  (Data.Aeson.Diff.Generic.patch, applyOperation, JsonPatch(..),
+   getValueAtPointer, getDataAtPointer, GetSet(..), FieldLens(..)
   ) where
 
 import Data.Aeson.Types

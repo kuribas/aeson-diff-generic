@@ -25,5 +25,7 @@ Library
                  th-abstraction
   Exposed-Modules: Data.Aeson.Diff.Generic
                    Data.Aeson.Diff.Generic.TH
+                   Data.Aeson.Diff.Generic.Instances
   Other-Modules: Data.Aeson.Diff.Generic.Types
-                 Data.Aeson.Diff.Generic.Instances
+                 
+                 

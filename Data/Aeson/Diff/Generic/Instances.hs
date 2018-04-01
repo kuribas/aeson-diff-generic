@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
-  ExistentialQuantification, TemplateHaskell #-}
+  ExistentialQuantification, TemplateHaskell, StandaloneDeriving,
+  GeneralizedNewtypeDeriving#-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Data.Aeson.Diff.Generic.Instances
   () where
@@ -35,15 +36,62 @@ import Data.Time.Calendar
 import Data.UUID.Types
 import Data.Ratio
 import Data.Fixed
-import Data.Semigroup
-import qualified Data.List.NonEmpty
-import qualified Data.DList
+import Data.Semigroup hiding (Sum, Product)
+import qualified Data.List.NonEmpty as NonEmpty
+import qualified Data.DList as DList
 import Data.Hashable
 import Data.Proxy
 import Data.Tagged
 import Unsafe.Coerce
-import Data.Aeson.Diff.Generic.Types
 import Data.Aeson.Diff.Generic.TH
+import Data.Aeson.Diff.Generic.Types
+import Data.IntMap (IntMap)
+import Data.Functor.Compose
+import Data.Functor.Product
+import Data.Functor.Sum
+import Data.Functor.Const
+import Data.Functor.Classes
+
+instance FieldLens Bool
+instance FieldLens Char
+instance FieldLens Double
+instance FieldLens Float
+instance FieldLens Int
+instance FieldLens Int8
+instance FieldLens Int16
+instance FieldLens Int32
+instance FieldLens Int64
+instance FieldLens Integer
+instance FieldLens Natural
+instance FieldLens Ordering
+instance FieldLens Word
+instance FieldLens Word8
+instance FieldLens Word16
+instance FieldLens Word32
+instance FieldLens Word64
+instance FieldLens ()
+instance FieldLens T.Text
+instance FieldLens Data.Text.Lazy.Text
+instance FieldLens Version
+instance FieldLens CTime
+instance FieldLens Data.IntSet.IntSet
+instance FieldLens Scientific
+instance FieldLens LocalTime
+instance FieldLens TimeOfDay
+instance FieldLens UTCTime
+instance FieldLens NominalDiffTime
+instance FieldLens DiffTime
+instance FieldLens Day
+instance FieldLens UUID
+instance FieldLens DotNetTime
+instance (Hashable a, Eq a, FromJSON a, Typeable a, ToJSON a) =>
+         FieldLens (HashSet.HashSet a)
+instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  =>
+         FieldLens (Ratio a)
+instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) =>
+         FieldLens (Fixed a)
+instance (JsonPatch a) => FieldLens (IntMap a)
+instance Typeable a => FieldLens (Proxy a)
 
 instance JsonPatch Bool
 instance JsonPatch Char
@@ -84,45 +132,8 @@ instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  =>
          JsonPatch (Ratio a)
 instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) =>
          JsonPatch (Fixed a)
-
-instance FieldLens Bool
-instance FieldLens Char
-instance FieldLens Double
-instance FieldLens Float
-instance FieldLens Int
-instance FieldLens Int8
-instance FieldLens Int16
-instance FieldLens Int32
-instance FieldLens Int64
-instance FieldLens Integer
-instance FieldLens Natural
-instance FieldLens Ordering
-instance FieldLens Word
-instance FieldLens Word8
-instance FieldLens Word16
-instance FieldLens Word32
-instance FieldLens Word64
-instance FieldLens ()
-instance FieldLens T.Text
-instance FieldLens Data.Text.Lazy.Text
-instance FieldLens Version
-instance FieldLens CTime
-instance FieldLens Data.IntSet.IntSet
-instance FieldLens Scientific
-instance FieldLens LocalTime
-instance FieldLens TimeOfDay
-instance FieldLens UTCTime
-instance FieldLens NominalDiffTime
-instance FieldLens DiffTime
-instance FieldLens Day
-instance FieldLens UUID
-instance FieldLens DotNetTime
-instance (Hashable a, Eq a, FromJSON a, Typeable a, ToJSON a) =>
-         FieldLens (HashSet.HashSet a)
-instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  =>
-         FieldLens (Ratio a)
-instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) =>
-         FieldLens (Fixed a)
+-- IntMap is also a terminal instance, because of the strange representation.
+instance JsonPatch a => JsonPatch (IntMap a)         
 
 deriveJsonPatch (defaultOptions {sumEncoding = ObjectWithSingleField}) ''Either
 deriveJsonPatch (defaultOptions {sumEncoding = UntaggedValue}) ''Maybe
@@ -141,30 +152,22 @@ deriveJsonPatch defaultOptions ''(,,,,,,,,,,,,)
 deriveJsonPatch defaultOptions ''(,,,,,,,,,,,,,)
 deriveJsonPatch defaultOptions ''(,,,,,,,,,,,,,,)
 
-deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Proxy
-deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Min
-deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Max
-deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''First
-deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Last
-deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''WrappedMonoid
-deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Option
-deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Identity
-deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Dual
---deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Sum
---deriveJsonPatch (defaultOptions {unwrapUnaryRecords = True}) ''Product
--- instance FieldLens Compose
+instance Typeable a => JsonPatch (Proxy a)
+deriving instance JsonPatch a => JsonPatch (Min a)
+deriving instance JsonPatch a => JsonPatch (Max a)
+deriving instance JsonPatch a => JsonPatch (First a)
+deriving instance JsonPatch a => JsonPatch (Last a)
+deriving instance JsonPatch a => JsonPatch (WrappedMonoid a)
+deriving instance JsonPatch a => JsonPatch (Option a)
+deriving instance JsonPatch a => JsonPatch (Identity a)
+deriving instance JsonPatch a => JsonPatch (Dual a)
+deriving instance (Typeable b, JsonPatch a) => JsonPatch (Const a b)
+deriving instance (Eq1 f, Eq1 g, FromJSON1 f, FromJSON1 g, Typeable f,
+                   Typeable g, JsonPatch a, ToJSON1 f,
+                   ToJSON1 g, JsonPatch (f (g a)))
+                  => JsonPatch (Compose f g a)
+deriving instance (Typeable a, JsonPatch b) => JsonPatch (Tagged a b)
 
-instance (FieldLens b, Typeable a) => FieldLens (Tagged a b) where
-  fieldLens = wrapperFieldLens Tagged unTagged
-  insertAt = wrapperInsertAt Tagged unTagged
-  deleteAt = wrapperDeleteAt Tagged unTagged
-
-instance JsonPatch a => JsonPatch (Data.DList.DList a)
-instance JsonPatch a => FieldLens (Data.DList.DList a) where
-  fieldLens = wrapperFieldLens Data.DList.fromList Data.DList.toList
-  insertAt = wrapperInsertAt Data.DList.fromList Data.DList.toList
-  deleteAt = wrapperDeleteAt Data.DList.fromList Data.DList.toList
-  
 intKey :: Key -> Result Int
 intKey (OKey _) = Error "expected Array Key."
 intKey (AKey i) = pure i
@@ -176,7 +179,6 @@ strKey (AKey i) = T.pack $ show i
 isEndKey :: Key -> Bool
 isEndKey = (== OKey "-")
 
-instance JsonPatch a => FieldLens (Data.List.NonEmpty.NonEmpty a)
 -- instance FieldLens (Tree a)
 
 splitList :: Int -> [a] -> Maybe ([a], [a])
@@ -187,7 +189,34 @@ splitList n (x:xs) = do
   (l, r) <- splitList (n-1) xs
   pure (x:l, r)
 
-instance JsonPatch a => JsonPatch (Data.List.NonEmpty.NonEmpty a)
+instance (ToJSON1 f, ToJSON1 g, FromJSON1 f, FromJSON1 g, Eq1 f, Eq1 g,
+          JsonPatch a, Typeable f, Typeable g, JsonPatch (f a), JsonPatch (g a))
+         => JsonPatch (Product f g a)
+instance (ToJSON1 f, ToJSON1 g, FromJSON1 f, FromJSON1 g, Eq1 f, Eq1 g,
+          JsonPatch a, Typeable f, Typeable g, JsonPatch (f a), JsonPatch (g a))
+          => FieldLens (Product f g a) where
+  fieldLens key (Pair l r) = do
+    i <- intKey key
+    case i of
+      0 -> pure $ GetSet l (\v -> pure $ Pair v r)
+      1 -> pure $ GetSet r (\v -> pure $ Pair l v)
+      _ -> Error "Invalid path"
+
+instance (ToJSON1 f, ToJSON1 g, FromJSON1 f, FromJSON1 g, Eq1 f, Eq1 g,
+          JsonPatch a, Typeable f, Typeable g, JsonPatch (f a), JsonPatch (g a))
+         => JsonPatch (Sum f g a)
+instance (ToJSON1 f, ToJSON1 g, FromJSON1 f, FromJSON1 g, Eq1 f, Eq1 g,
+          JsonPatch a, Typeable f, Typeable g, JsonPatch (f a), JsonPatch (g a))
+          => FieldLens (Sum f g a) where
+  fieldLens key (InL x) =
+    case strKey key of
+      "InL" -> pure $ GetSet x (pure . InL)
+      _ -> Error "Invalid path"
+
+  fieldLens key (InR x) =
+    case strKey key of
+      "InR" -> pure $ GetSet x (pure . InR)
+      _ -> Error "Invalid path"
 
 instance JsonPatch a => JsonPatch [a]
 instance JsonPatch a => FieldLens [a] where
@@ -212,6 +241,34 @@ instance JsonPatch a => FieldLens [a] where
       Just (l, r1:rs) -> pure (f r1, l ++ rs)
       _ -> Error "Index out of bounds"
 
+instance JsonPatch a => JsonPatch (NonEmpty.NonEmpty a)
+instance JsonPatch a => FieldLens (NonEmpty.NonEmpty a) where
+  fieldLens key ne = do
+    GetSet v f <- fieldLens key (NonEmpty.toList ne)
+    pure $ GetSet v (fmap NonEmpty.fromList . f)
+  {-# INLINE fieldLens #-}
+
+  insertAt key ne v f =
+    NonEmpty.fromList <$> insertAt key (NonEmpty.toList ne) v f
+  deleteAt key ne f = do
+    (r, l) <- deleteAt key (NonEmpty.toList ne) f
+    case NonEmpty.nonEmpty l of
+      Nothing -> Error "Cannot delete last element of NonEmpty"
+      Just ne2 -> pure (r, ne2)
+
+instance JsonPatch a => JsonPatch (DList.DList a)
+instance JsonPatch a => FieldLens (DList.DList a) where
+  fieldLens key dl = do
+    GetSet v f <- fieldLens key (DList.toList dl)
+    pure $ GetSet v (fmap DList.fromList . f)
+  {-# INLINE fieldLens #-}
+
+  insertAt key dl v f =
+    DList.fromList <$> insertAt key (DList.toList dl) v f
+  deleteAt key dl f = 
+    fmap DList.fromList <$> deleteAt key (DList.toList dl) f
+    
+      
 instance (Ord a, JsonPatch a) => JsonPatch (Set.Set a) 
 instance (Ord a, JsonPatch a) => FieldLens (Set.Set a) where
   fieldLens key st = do

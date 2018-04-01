@@ -1,11 +1,11 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, DefaultSignatures, MultiWayIf,
-   ExistentialQuantification #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, DefaultSignatures,
+    MultiWayIf, ExistentialQuantification, TemplateHaskell #-}
 module Data.Aeson.Diff.Generic.Types where
 
-import Data.Dynamic
 import Data.Aeson.Types
 import Data.Aeson.Pointer as Pointer
 import Control.Monad
+import Data.Dynamic
 
 data GetSet s = forall v. JsonPatch v => GetSet v (v -> Result s)
 
@@ -58,7 +58,7 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
       updateAtKey toKey s $
       copyPath (Pointer fromPath) (Pointer toPath)
   copyPath from to_ s = do
-    v <- getDynamicAtPointer from s
+    v <- getAtPointer from s toDyn
     addAtPointer to_ s v getDynamic
 
   movePath :: Pointer -> Pointer -> s -> Result s
@@ -104,8 +104,14 @@ getValueAtPointer p s = getAtPointer p s toJSON
 {-# INLINE [1] getValueAtPointer #-}
 {-# RULES "getValueAtPointer/Value" getValueAtPointer = Pointer.get #-} 
 
+getDataAtPointer :: (JsonPatch s, Typeable a) => Pointer -> s
+                 -> Result a
+getDataAtPointer p s = getDynamic =<< getAtPointer p s toDyn
+{-# INLINE [1] getDataAtPointer #-}  
+{-# RULES "getDataAtPointer/Value" getDataAtPointer = Pointer.get #-} 
+
 getDynamic ::(Typeable a) => Dynamic -> Result a
-getDynamic = maybe (Error "type mismatch") pure . fromDynamic
+getDynamic = maybe (Error "Couldn't match types") pure . fromDynamic
 
 updateAtKey :: FieldLens s => Key -> s
             -> (forall v.JsonPatch v => v -> Result v)
@@ -121,27 +127,3 @@ setAtKey :: FieldLens s => Key -> s -> r
 setAtKey k s a f = updateAtKey k s $ const (f a)
 {-# INLINE setAtKey #-}
 
-getDynamicAtPointer :: JsonPatch s => Pointer -> s -> Result Dynamic
-getDynamicAtPointer p s = getAtPointer p s toDyn
-{-# INLINE getDynamicAtPointer #-}  
-
-wrapperFieldLens :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
-                 -> Key -> w -> Result (GetSet w)
-wrapperFieldLens wrap unwrap key el = do
-  GetSet v setr <- fieldLens key (unwrap el)
-  pure $ GetSet v (fmap wrap . setr)
-{-# INLINE wrapperFieldLens #-}
-  
-wrapperInsertAt :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
-                -> Key -> w -> r ->  (forall v.(JsonPatch v) => r -> Result v)
-                -> Result w
-wrapperInsertAt wrap unwrap key el r f = 
-  wrap <$> insertAt key (unwrap el) r f
-{-# INLINE wrapperInsertAt #-}  
-
-wrapperDeleteAt :: (FieldLens u, FieldLens w) => (u -> w) -> (w -> u)
-                -> Key -> w -> (forall v.(JsonPatch v) => v -> r)
-                -> Result (r, w)
-wrapperDeleteAt wrap unwrap key el f = 
-  fmap wrap <$> deleteAt key (unwrap el) f
-{-# INLINE wrapperDeleteAt #-}    

@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
-    ExistentialQuantification, TemplateHaskell #-}
+    ExistentialQuantification, TemplateHaskell, PatternGuards #-}
 module Data.Aeson.Diff.Generic.TH (deriveJsonPatch)
   where
 
@@ -263,13 +263,23 @@ makeSingleCase pathVar prefix consName = do
 
 deriveJsonPatch :: Options -> Name -> DecsQ
 deriveJsonPatch options name = do
-  (pathLensName, pathLensDecls) <- makePathLens options name
-  (mbLensName, mbLensDecls) <- makeMaybeLens options name
+  (pathLensName, pathLensDecl) <- makePathLens options name
+  (mbLensName, mbLensDecl) <- makeMaybeLens options name
   sigVars <- datatypeVars <$> reifyDatatype name
-  let vars = [vr | SigT vr _ <- sigVars]
-  context <- mapM (\v -> [t| JsonPatch $(pure v) |]) vars
+  vars <- mapM (const $ newName "a") sigVars
+  let appliedType = foldl appT (conT name) $ map varT vars
+      constrained =
+        forallT (map plainTV vars) $ 
+        mapM (\v -> [t| JsonPatch $(varT v) |])
+        vars
+  pathLensSig <- sigD pathLensName $ constrained 
+    [t| $(appliedType) -> Path ->
+        Result (Path, Path, GetSetPure $(appliedType)) |]
+  mbLensSig <- sigD mbLensName $ constrained
+    [t| $(appliedType) -> Path -> Result (GetSetMaybe $(appliedType)) |]
+  context <- mapM (\v -> [t| JsonPatch $(varT v) |]) vars
   classDecl <- instanceD (pure context)
-               [t| JsonPatch $(foldl appT (conT name) $ pure <$> vars) |]
+               [t| JsonPatch $(appliedType) |]
     [ funD 'getAtPointer [
         clause [] (normalB [| getAtPointerTH $(varE pathLensName) |]) []]
     , funD 'deleteAtPointer [
@@ -286,7 +296,7 @@ deriveJsonPatch options name = do
     , funD 'testAtPointer [
         clause [] (normalB [| testAtPointerTH $(varE pathLensName) |]) []]
     ]
-  pure [pathLensDecls, mbLensDecls, classDecl]
+  pure [pathLensSig, pathLensDecl, mbLensSig, mbLensDecl, classDecl]
 
 makePathLens :: Options -> Name -> Q (Name, Dec)
 makePathLens options name = do
@@ -338,14 +348,16 @@ makePathLens options name = do
       cases :: [MatchQ]
       cases = mapMaybe makeCase (datatypeCons typeInfo)
 
-      lensBody = case cases of
-        [] -> [| Error "Invalid Path" |]
-        _ -> caseE (varE struc) $
-             cases ++ if length cases == nConstructors
-                      then [] else  [invalidMatch]
-          
-  lensDecl <- funD funName [
-    clause [varP struc, varP pathVar] (normalB lensBody) []]
+      lensClause = case cases of
+        [] -> clause [wildP, wildP] (normalB [| Error "Invalid Path" |]) []
+        _ -> clause [varP struc, varP pathVar] (
+          normalB $
+          caseE (varE struc) $
+          cases ++ if length cases == nConstructors
+            then [] else  [invalidMatch]
+          ) []
+
+  lensDecl <- funD funName [lensClause]
   pure (funName, lensDecl)
 
 -- return a lens that only works on maybe fields.  Ugh, so much duplication...
@@ -396,12 +408,14 @@ makeMaybeLens options name = do
       cases :: [MatchQ]
       cases = mapMaybe makeCase (datatypeCons typeInfo)
 
-      lensBody = case cases of
-        [] -> [| Error "Invalid Path" |]
-        _ -> caseE (varE struc) $
-             cases ++ if length cases == nConstructors
-                      then [] else  [invalidMatch]
+      lensClause = case cases of
+        [] -> clause [wildP, wildP] (normalB [| Error "Invalid Path" |]) []
+        _ -> clause [varP struc, varP pathVar] (
+          normalB $
+          caseE (varE struc) $
+          cases ++ if length cases == nConstructors
+            then [] else  [invalidMatch]
+          ) []
           
-  lensDescr <- funD funName [
-    clause [varP struc, varP pathVar] (normalB lensBody) []]
-  pure (funName, lensDescr)
+  lensDecl <- funD funName [lensClause]
+  pure (funName, lensDecl)
