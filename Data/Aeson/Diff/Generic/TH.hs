@@ -1,5 +1,10 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
     ExistentialQuantification, TemplateHaskell, PatternGuards #-}
+{-|
+This module contains functions to automatically derive `JsonPatch` instances.
+-}
+
+
 module Data.Aeson.Diff.Generic.TH (deriveJsonPatch)
   where
 
@@ -16,6 +21,7 @@ import Control.Monad
 import Data.Maybe
 import Control.Applicative
 
+
 data GetSetPure s = forall v. JsonPatch v => GetSetPure Bool v (v -> s)
 type PathLens s = s -> Path -> Result (Path, Path, GetSetPure s)
 
@@ -23,6 +29,47 @@ data GetSetMaybe s = forall v. JsonPatch (Maybe v) =>
                      GetSetMaybe (Maybe v) (Maybe v -> s)
 -- a lens which only works on record fields which have type Maybe
 type PathLensMaybe s = s -> Path -> Result (GetSetMaybe s)
+
+-- | Derive a JsonPatch instance, using the given aeson `Options`.
+-- This should work with a `ToJSON` and `FromJSON` instance that uses the
+-- same options.
+deriveJsonPatch :: Options -> Name -> DecsQ
+deriveJsonPatch options name = do
+  (pathLensName, pathLensDecl) <- makePathLens options name
+  (mbLensName, mbLensDecl) <- makeMaybeLens options name
+  sigVars <- datatypeVars <$> reifyDatatype name
+  vars <- mapM (const $ newName "a") sigVars
+  let appliedType = foldl appT (conT name) $ map varT vars
+      constrained =
+        forallT (map plainTV vars) $ 
+        mapM (\v -> [t| JsonPatch $(varT v) |])
+        vars
+  pathLensSig <- sigD pathLensName $ constrained 
+    [t| $(appliedType) -> Path ->
+        Result (Path, Path, GetSetPure $(appliedType)) |]
+  mbLensSig <- sigD mbLensName $ constrained
+    [t| $(appliedType) -> Path -> Result (GetSetMaybe $(appliedType)) |]
+  context <- mapM (\v -> [t| JsonPatch $(varT v) |]) vars
+  classDecl <- instanceD (pure context)
+               [t| JsonPatch $(appliedType) |]
+    [ funD 'getAtPointer [
+        clause [] (normalB [| getAtPointerTH $(varE pathLensName) |]) []]
+    , funD 'deleteAtPointer [
+        clause [] (normalB [| deleteAtPointerTH $(varE pathLensName)
+                             $(varE mbLensName) |]) []]
+    , funD 'addAtPointer [
+        clause [] (normalB [| addAtPointerTH $(varE pathLensName) |]) []]
+    , funD 'movePath [
+        clause [] (normalB [| movePathTH $(varE pathLensName) |]) []]
+    , funD 'copyPath [
+        clause [] (normalB [| copyPathTH $(varE pathLensName) |]) []]
+    , funD 'replaceAtPointer [
+        clause [] (normalB [| replaceAtPointerTH $(varE pathLensName) |]) []]
+    , funD 'testAtPointer [
+        clause [] (normalB [| testAtPointerTH $(varE pathLensName) |]) []]
+    ]
+  pure [pathLensSig, pathLensDecl, mbLensSig, mbLensDecl, classDecl]
+
 
 getAtPointerTH :: (JsonPatch s) => PathLens s -> Pointer -> s
                      -> (forall v.JsonPatch v => v -> r) -> Result r
@@ -260,43 +307,6 @@ makeSingleCase pathVar prefix consName = do
                          varE v2)) |]
            , invalidMatch]
     ) []
-
-deriveJsonPatch :: Options -> Name -> DecsQ
-deriveJsonPatch options name = do
-  (pathLensName, pathLensDecl) <- makePathLens options name
-  (mbLensName, mbLensDecl) <- makeMaybeLens options name
-  sigVars <- datatypeVars <$> reifyDatatype name
-  vars <- mapM (const $ newName "a") sigVars
-  let appliedType = foldl appT (conT name) $ map varT vars
-      constrained =
-        forallT (map plainTV vars) $ 
-        mapM (\v -> [t| JsonPatch $(varT v) |])
-        vars
-  pathLensSig <- sigD pathLensName $ constrained 
-    [t| $(appliedType) -> Path ->
-        Result (Path, Path, GetSetPure $(appliedType)) |]
-  mbLensSig <- sigD mbLensName $ constrained
-    [t| $(appliedType) -> Path -> Result (GetSetMaybe $(appliedType)) |]
-  context <- mapM (\v -> [t| JsonPatch $(varT v) |]) vars
-  classDecl <- instanceD (pure context)
-               [t| JsonPatch $(appliedType) |]
-    [ funD 'getAtPointer [
-        clause [] (normalB [| getAtPointerTH $(varE pathLensName) |]) []]
-    , funD 'deleteAtPointer [
-        clause [] (normalB [| deleteAtPointerTH $(varE pathLensName)
-                             $(varE mbLensName) |]) []]
-    , funD 'addAtPointer [
-        clause [] (normalB [| addAtPointerTH $(varE pathLensName) |]) []]
-    , funD 'movePath [
-        clause [] (normalB [| movePathTH $(varE pathLensName) |]) []]
-    , funD 'copyPath [
-        clause [] (normalB [| copyPathTH $(varE pathLensName) |]) []]
-    , funD 'replaceAtPointer [
-        clause [] (normalB [| replaceAtPointerTH $(varE pathLensName) |]) []]
-    , funD 'testAtPointer [
-        clause [] (normalB [| testAtPointerTH $(varE pathLensName) |]) []]
-    ]
-  pure [pathLensSig, pathLensDecl, mbLensSig, mbLensDecl, classDecl]
 
 makePathLens :: Options -> Name -> Q (Name, Dec)
 makePathLens options name = do

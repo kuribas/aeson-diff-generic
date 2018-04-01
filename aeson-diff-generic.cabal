@@ -11,7 +11,7 @@ Maintainer:	Kristof Bastiaensen
 Bug-Reports: 	https://github.com/kuribas/cubicbezier/issues
 Build-type:	Simple
 Cabal-version:	>=1.8
-Description:	Apply a json-patch to any haskell datatype.  It extends the capabilities of the aeson-diff packages, and includes template haskell functions for generating the right type classes.
+Description:	Apply a json-patch to any haskell datatype.  It extends the capabilities of the aeson-diff packages, and includes template haskell functions for automatically deriving the right instances.
  
 Source-repository head
   type:		git

@@ -7,20 +7,39 @@ import Data.Aeson.Pointer as Pointer
 import Control.Monad
 import Data.Dynamic
 
+-- | An existentially quantified getter and setter.  The data inside
+-- is manipulated using json conversion functions (`toJSON`,
+-- `fromJSON`), or "Data.Dynamic" (`getDynamic`, `toDyn`, etc...).
 data GetSet s = forall v. JsonPatch v => GetSet v (v -> Result s)
 
 class (Eq s, ToJSON s, FromJSON s, Typeable s) => FieldLens s where
+  -- | Map a key to a getter and setter on the given data.
   fieldLens :: Key -> s -> Result (GetSet s)
   fieldLens _ _ = Error "Invalid pointer"
 
+  -- | Delete and return the data at the given key.  The helper
+  -- function determines which value to return: `toJSON` to return an
+  -- aeson `Value`, `toDyn` to return a `Dynamic`.
   deleteAt :: Key -> s -> (forall v.(JsonPatch v) => v -> r)
            -> Result (r, s)
   deleteAt _ _ _ = Error "Illegal operation"
 
+  -- | Insert a value at the given key.  The helper function
+  -- determines how to convert the value: `fromJSON` to convert from
+  -- an aeson `Value`, `getDynamic` to convert from a `Dynamic`.
   insertAt :: Key -> s -> r -> (forall v.(JsonPatch v) => r -> Result v)
            -> Result s
   insertAt _ _ _ _ = Error "Illegal operation"
 
+-- | This class defines all operations necessary for applying patches.
+-- Instances can be written by hand, however it's easier to use the
+-- `fieldLens` class instead, or to derive it automatically using the
+-- template haskell functions from the "Data.Aeson.Diff.Generic.TH"
+-- module. The default implementation is based on `fieldLens`, which
+-- matches a string to a existentially quantified getter and setter
+-- (the `GetSet` datatype).  The Instances can be found in the
+-- "Data.Aeson.Diff.Generic.Instances" module, which this module
+-- exports.
 class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
   -- | Retrieve the value at the pointer.  To get back a json `Value`
   -- use `toJSON` as the helper function, to get back a `Dynamic` use
@@ -59,8 +78,8 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
     updateAtKey key s $ \v ->
     addAtPointer (Pointer path) v val f
 
-  -- | copyPath @src@ @dst@ s.  Copy the value at src to dest in s.  The
-  -- types have to match.
+  -- | copyPath @src@ @dst@ s.  Copy the value at src to dest in s.
+  -- If the types don't match an error is returned
   copyPath :: Pointer -> Pointer -> s -> Result s
   default copyPath :: FieldLens s => Pointer -> Pointer -> s -> Result s
   copyPath (Pointer (fromKey: fromPath)) (Pointer (toKey: toPath)) s
@@ -71,8 +90,8 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
     v <- getAtPointer from s toDyn
     addAtPointer to_ s v getDynamic
 
-  -- | movePath @src@ @dst@ s.  Move the value from src to dest in s.  The
-  -- types have to match.
+  -- | movePath @src@ @dst@ s.  Move the value from src to dest in
+  -- s. If the types don't match an error is returned
   movePath :: Pointer -> Pointer -> s -> Result s
   default movePath :: FieldLens s => Pointer -> Pointer -> s -> Result s
   movePath (Pointer []) (Pointer []) s = pure s

@@ -1,8 +1,17 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
    ExistentialQuantification #-}
+{-| This library allows you to apply a json-patch document
+  (<https://tools.ietf.org/html/rfc6902 rfc6902>) directly to a
+  haskell datatype.  It's based on the "Data.Aeson.Diff" module.
+-}
+
 module Data.Aeson.Diff.Generic
-  (Data.Aeson.Diff.Generic.patch, applyOperation, JsonPatch(..),
-   getDynamic, getValueAtPointer, getDataAtPointer, GetSet(..), FieldLens(..)
+  ( -- * patch operations
+    Data.Aeson.Diff.Generic.patch, applyOperation, JsonPatch(..),
+   getDynamic, getValueAtPointer, getDataAtPointer,
+   -- * the fieldLens class
+   -- | `FieldLens` provides a simpler way to create `JsonPatch` instances.
+   GetSet(..), FieldLens(..)
   ) where
 
 import Data.Aeson.Types
@@ -14,7 +23,7 @@ import qualified Data.Text as T
 import Data.Aeson.Diff.Generic.Types
 import Data.Aeson.Diff.Generic.Instances()
 
--- | Apply the json patch to the data.
+-- | Apply a json patch document to the data.
 patch :: JsonPatch a => Patch -> a -> Result a
 patch = foldr (>=>) pure . map applyOperation . patchOperations
 {-# NOINLINE patch #-}

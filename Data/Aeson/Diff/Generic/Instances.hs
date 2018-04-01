@@ -2,6 +2,13 @@
   ExistentialQuantification, TemplateHaskell, StandaloneDeriving,
   GeneralizedNewtypeDeriving#-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+
+{-| Instances are put into this module to avoid circular dependencies
+  with the TH module.  There is no need to import this module, since
+  it is already re-exported in "Data.Aeson.Diff.Generic".  This module
+  is only exported for documentation purpose.
+-}
+
 module Data.Aeson.Diff.Generic.Instances
   () where
 
