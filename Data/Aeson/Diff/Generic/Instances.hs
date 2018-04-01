@@ -51,6 +51,7 @@ import Data.Functor.Product
 import Data.Functor.Sum
 import Data.Functor.Const
 import Data.Functor.Classes
+import Data.Tree (Tree(..))
 
 instance FieldLens Bool
 instance FieldLens Char
@@ -132,7 +133,8 @@ instance (Typeable a, Integral a, ToJSON a, FromJSON a, Eq a)  =>
          JsonPatch (Ratio a)
 instance (HasResolution a, Typeable a, FromJSON a, ToJSON a) =>
          JsonPatch (Fixed a)
--- IntMap is also a terminal instance, because of the strange representation.
+-- IntMap is also a terminal instance, because it is represented by an
+-- Array rather than an Object, which makes indexing not possible.
 instance JsonPatch a => JsonPatch (IntMap a)         
 
 deriveJsonPatch (defaultOptions {sumEncoding = ObjectWithSingleField}) ''Either
@@ -188,6 +190,15 @@ splitList _ [] = Nothing
 splitList n (x:xs) = do
   (l, r) <- splitList (n-1) xs
   pure (x:l, r)
+
+instance (JsonPatch a) => JsonPatch (Tree a)
+instance (JsonPatch a) => FieldLens (Tree a) where
+  fieldLens key (Node x t) = do
+    i <- intKey key
+    case i of
+      0 -> pure $ GetSet x (\v -> pure $ Node v t)
+      1 -> pure $ GetSet t (\v -> pure $ Node x v)
+      _ -> Error "Invalid path"
 
 instance (ToJSON1 f, ToJSON1 g, FromJSON1 f, FromJSON1 g, Eq1 f, Eq1 g,
           JsonPatch a, Typeable f, Typeable g, JsonPatch (f a), JsonPatch (g a))
