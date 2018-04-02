@@ -98,7 +98,7 @@ instance JsonPatch Person
 instance JsonPatch Pet
 ```
 
-== Creating instances with fieldlens.
+## Creating instances with fieldlens.
 
 FieldLens still involves some boilerplate.  We can avoid that by using
 the template haskell functions from "Data.Aeson.Diff.Generic.TH":
@@ -110,7 +110,7 @@ instance FieldLens Pet
 deriveJsonPatch defaultOptions ''Person
 ```
 
-== applying patches
+## applying patches
 
 Now we can apply patches to our data:
 
