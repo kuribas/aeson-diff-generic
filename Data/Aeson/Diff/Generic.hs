@@ -2,7 +2,10 @@
    ExistentialQuantification #-}
 {-| This library allows you to apply a json-patch document
   (<https://tools.ietf.org/html/rfc6902 rfc6902>) directly to a
-  haskell datatype.  It's based on the "Data.Aeson.Diff" module.
+  haskell datatype.  A JSON Patch document is a sequence
+of instructions to modify a JSON value.  This library allows you to
+modify the haskell datatype directly by matching it with its JSON
+representation.  It is suitable for use with the HTTP PATCH method.
 -}
 
 module Data.Aeson.Diff.Generic
