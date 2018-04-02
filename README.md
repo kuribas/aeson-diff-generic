@@ -1,8 +1,11 @@
 # Welcom to `aeson-diff-generic` [![Hackage](https://img.shields.io/hackage/v/aeson-diff-generic.svg)](https://hackage.haskell.org/package/aeson-diff-generic) [![Build Status](https://travis-ci.org/kuribas/aeson-diff-generic.svg)](https://travis-ci.org/kuribas/aeson-diff-generic)
 
-# Welcome to `aeson-diff-generic` 
-
-aeson-diff-generic is a haskell library that allows you to apply a JSON patch [rfc6902](https://tools.ietf.org/html/rfc6902) document directly to a haskell datatype.  A JSON Patch document is a sequence of instructions to modify a JSON value.  This library allows you to modify the haskell datatype directly by matching it withits JSON representation.  It is suitable for use with the HTTP PATCH method.  
+aeson-diff-generic is a haskell library that allows you to apply a
+JSON patch [rfc6902](https://tools.ietf.org/html/rfc6902) document
+directly to a haskell datatype.  A JSON Patch document is a sequence
+of instructions to modify a JSON value.  This library allows you to
+modify the haskell datatype directly by matching it with its JSON
+representation.  It is suitable for use with the HTTP PATCH method.  
 
 # Join in!
 
@@ -18,7 +21,7 @@ Master [git repository](http://github.com/kuribas/aeson-diff-generic):
 
 See what's changed in recent (and upcoming) releases:
 
-* https://github.com/kuribas/aeson-dif-generic/blob/master/changelog.md
+* https://github.com/kuribas/aeson-diff-generic/blob/master/changelog.md
 
 (You can create and contribute changes using git)
 
