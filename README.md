@@ -18,8 +18,8 @@ type Doc: we need a Doc patch, not a json patch.
 
 The aeson library uses GHC.Generics or template haskell to define a
 default json encoding for algebraic datatypes. The aeson-diff-generic
-can generate code, using options given to aeson, to interpret a json
-patch as a Doc patch.
+can generate code, using the same options as given to aeson, to
+interpret a json patch as a Doc patch.
 
 # Example
 
@@ -72,7 +72,7 @@ instance FieldLens Pet where
   fieldLens _ _ = Error "Invalid Path"
 ```
 
-Since this is the default implementation, so we can do simply:
+Since this is the default implementation, we can do simply:
 
 ```haskell
 instance FieldLens Pet
