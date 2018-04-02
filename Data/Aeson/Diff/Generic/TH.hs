@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, 
     ExistentialQuantification, TemplateHaskell, PatternGuards #-}
 {-|
 This module contains functions to automatically derive `JsonPatch` instances.
@@ -41,7 +41,7 @@ deriveJsonPatch options name = do
   vars <- mapM (const $ newName "a") sigVars
   let appliedType = foldl appT (conT name) $ map varT vars
       constrained =
-        forallT (map plainTV vars) $ 
+        forallT (map PlainTV vars) $ 
         mapM (\v -> [t| JsonPatch $(varT v) |])
         vars
   pathLensSig <- sigD pathLensName $ constrained 
