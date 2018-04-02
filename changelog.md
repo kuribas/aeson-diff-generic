@@ -1,3 +1,10 @@
+# aeson-diff-generic 0.0.2
+
+*April 2, 2018*
+
+   - Better documentation.
+   - Tested builds
+
 # aeson-diff-generic 0.0.1
 
 *April 1, 2018*

@@ -63,16 +63,16 @@ haskell with the "Data.Aeson.Diff.Generic.TH" module.
 
 ### Creating instances with fieldlens.
 
-A fieldlens maps a `Key` and onto a getter and setter into the given data.
+A fieldlens maps a `Key` onto a getter and setter into the given data.
 
-For our Pet datatype we don't have any sub-data, so it just returns an error:
+For our Pet datatype we don't have any fields to index into, so it just returns an error:
 
 ```haskell
 instance FieldLens Pet where
   fieldLens _ _ = Error "Invalid Path"
 ```
 
-In fact, this is the default implementation, so we can do simply:
+Since this is the default implementation, so we can do simply:
 
 ```haskell
 instance FieldLens Pet
