@@ -1,5 +1,5 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
-   ExistentialQuantification #-}
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts,
+    ExistentialQuantification #-}
 {-| This library allows you to apply a json-patch document
   (<https://tools.ietf.org/html/rfc6902 rfc6902>) directly to a
   haskell datatype.  A JSON Patch document is a sequence
@@ -30,7 +30,7 @@ import Data.Aeson.Diff.Generic.Instances()
 patch :: JsonPatch a => Patch -> a -> Result a
 patch = foldr (>=>) pure . map applyOperation . patchOperations
 {-# NOINLINE patch #-}
-{-# RULES "patch/Value" patch = Diff.patch #-} 
+{-# RULES "patch/Value" patch = Diff.patch #-}
 
 -- | Apply a single operation to the data.
 applyOperation :: JsonPatch a => Operation -> a -> Result a
