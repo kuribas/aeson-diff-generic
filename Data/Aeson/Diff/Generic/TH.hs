@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, 
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, ConstraintKinds,
     ExistentialQuantification, TemplateHaskell, PatternGuards #-}
 {-|
 This module contains functions to automatically derive `JsonPatch` instances.
@@ -15,7 +15,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Datatype
 import Data.List
 import Data.Aeson.Diff.Generic.Types
-import Text.Read
+import Text.Read.Compat
 import qualified Data.Text as T
 import Control.Monad
 import Data.Maybe

@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, MultiWayIf,
+{-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, 
   ExistentialQuantification, TemplateHaskell, StandaloneDeriving,
   GeneralizedNewtypeDeriving#-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
@@ -56,7 +56,7 @@ import Data.IntMap (IntMap)
 import Data.Functor.Compose
 import Data.Functor.Product
 import Data.Functor.Sum
-import Data.Functor.Const
+import Control.Applicative (Const(..))
 import Data.Functor.Classes
 import Data.Tree (Tree(..))
 

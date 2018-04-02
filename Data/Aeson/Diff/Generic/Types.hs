@@ -1,11 +1,11 @@
 {-# LANGUAGE OverloadedStrings, RankNTypes, FlexibleContexts, DefaultSignatures,
-    MultiWayIf, ExistentialQuantification, TemplateHaskell #-}
+    ExistentialQuantification, TemplateHaskell, TupleSections #-}
 module Data.Aeson.Diff.Generic.Types where
 
 import Data.Aeson.Types
 import Data.Aeson.Pointer as Pointer
-import Control.Monad
 import Data.Dynamic
+import Control.Applicative ((<$>), pure)
 
 -- | An existentially quantified getter and setter.  The data inside
 -- is manipulated using json conversion functions (`toJSON`,
@@ -63,7 +63,8 @@ class (Eq s, ToJSON s, FromJSON s, Typeable s) => JsonPatch s where
   deleteAtPointer (Pointer [key]) s f = deleteAt key s f
   deleteAtPointer (Pointer (key:path)) s f = do
     GetSet v setr <- fieldLens key s
-    join $ traverse setr <$> deleteAtPointer (Pointer path) v f
+    (r, s2) <- deleteAtPointer (Pointer path) v f
+    (r, ) <$> setr s2
 
   -- | Add a value at the pointer.  To insert a json `Value`, use
   -- `fromJSON` as the helper function, to insert a `Dynamic` use `getDynamic`.

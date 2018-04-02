@@ -11,10 +11,7 @@ Maintainer:	Kristof Bastiaensen
 Bug-Reports: 	https://github.com/kuribas/aeson-diff-generic/issues
 Build-type:	Simple
 Cabal-version:	>=1.8
-Tested-With:    GHC == 7.4.2
-                GHC == 7.6.3
-                GHC == 7.8.4
-                GHC == 7.10.2
+Tested-With:    GHC == 7.10.2
                 GHC == 8.0.2
                 GHC == 8.2.2
 Description:	Apply a json-patch directly to a haskell datatype.  It extends the capabilities of the aeson-diff packages, and includes template haskell functions for automatically deriving the right instances.
@@ -40,7 +37,7 @@ Library
                  dlist >= 0.6,
                  base >= 4.5 && < 5,
                  base-compat >= 0.9.1 && < 0.10,
-                 containers >= 0.4.2,
+                 containers >= 0.5.8,
                  dlist >= 0.6,
                  scientific >= 0.3.4.7 && < 0.4,
                  tagged >=0.8.3 && <0.9,
