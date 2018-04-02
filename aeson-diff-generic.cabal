@@ -8,7 +8,7 @@ License:	BSD3
 License-file:	LICENSE
 Author:		Kristof Bastiaensen
 Maintainer:	Kristof Bastiaensen
-Bug-Reports: 	https://github.com/kuribas/cubicbezier/issues
+Bug-Reports: 	https://github.com/kuribas/aeson-diff-generic/issues
 Build-type:	Simple
 Cabal-version:	>=1.8
 Description:	Apply a json-patch to any haskell datatype.  It extends the capabilities of the aeson-diff packages, and includes template haskell functions for automatically deriving the right instances.
