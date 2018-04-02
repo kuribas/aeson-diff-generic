@@ -21,7 +21,7 @@ default json encoding for algebraic datatypes. The aeson-diff-generic
 can generate code, using options given to aeson, to interpret a json
 patch as a Doc patch.
 
-## Example
+# Example
 
 Suppose we have a datatype for which we have a ToJSON and FromJSON instance:
 
@@ -61,7 +61,7 @@ one by hand is tedious, so aeson-diff-generic gives two alternative
 ways to create one: using the `FieldLens` class, or using template
 haskell with the "Data.Aeson.Diff.Generic.TH" module.
 
-## Creating instances with fieldlens.
+### Creating instances with fieldlens.
 
 A fieldlens maps a `Key` and onto a getter and setter into the given data.
 
@@ -98,7 +98,7 @@ instance JsonPatch Person
 instance JsonPatch Pet
 ```
 
-## Creating instances with fieldlens.
+### Creating instances with template haskell
 
 FieldLens still involves some boilerplate.  We can avoid that by using
 the template haskell functions from "Data.Aeson.Diff.Generic.TH":
@@ -110,7 +110,7 @@ instance FieldLens Pet
 deriveJsonPatch defaultOptions ''Person
 ```
 
-## applying patches
+### applying patches
 
 Now we can apply patches to our data:
 
