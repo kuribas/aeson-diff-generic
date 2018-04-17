@@ -1,5 +1,8 @@
 # aeson-diff-generic 0.0.2
 
+*April 17, 2018*
+   - Implement path optics.
+
 *April 2, 2018*
 
    - Better documentation.
