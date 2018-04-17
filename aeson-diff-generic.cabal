@@ -1,5 +1,5 @@
 Name:		aeson-diff-generic
-Version: 	0.0.2
+Version: 	0.0.3
 Synopsis:	Apply a json-patch to any haskell datatype.
 Category: 	JSON, Web
 Copyright: 	Kristof Bastiaensen (2018)
@@ -47,7 +47,9 @@ Library
                  time >= 1.1.1.4,
                  unordered-containers >= 0.2.5.0 && < 0.3,
                  uuid-types >= 1.0.3 && <1.1,
-                 vector >= 0.8
+                 vector >= 0.8,
+                 lens >= 4.16 && < 4.17
+                        
 
   if !impl(ghc >= 8.0)
     -- `Data.Semigroup` and `Control.Monad.Fail` and `Control.Monad.IO.Class` are available in base only since GHC 8.0 / base 4.9
@@ -64,6 +66,7 @@ Library
   Exposed-Modules: Data.Aeson.Diff.Generic
                    Data.Aeson.Diff.Generic.TH
                    Data.Aeson.Diff.Generic.Instances
+                   Data.Aeson.Diff.Generic.PathOptics
   Other-Modules: Data.Aeson.Diff.Generic.Types
                  
                  
