@@ -15,7 +15,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Datatype
 import Data.List
 import Data.Aeson.Diff.Generic.Types
-import Text.Read.Compat
+import Text.Read
 import qualified Data.Text as T
 import Control.Monad
 import Data.Maybe

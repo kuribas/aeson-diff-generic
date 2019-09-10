@@ -21,12 +21,9 @@ module Data.Aeson.Diff.Generic.PathOptics
     _JustP)
 
 where
-import Prelude()
-import Prelude.Compat
 import Data.Aeson
 import Data.Aeson.Diff
 import Data.Aeson.Pointer
-import Data.Monoid
 import Data.Functor.Compose
 import Control.Lens
 
