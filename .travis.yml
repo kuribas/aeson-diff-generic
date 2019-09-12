@@ -47,11 +47,4 @@ install:
     fi
 
 script:
-  - |
-    if [ -z "$STACK_YAML" ]; then
-      cabal new-test --enable-tests
-    else
-      stack test --system-ghc
-    fi
-
   - curl -sSL https://raw.github.com/ndmitchell/neil/master/misc/travis.sh | sh -s -- hlint .
