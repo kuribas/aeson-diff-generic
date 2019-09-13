@@ -16,7 +16,6 @@ Tested-With:    GHC == 7.10.2
               , GHC == 8.2.2
               , GHC == 8.4.4
               , GHC == 8.6.5
-              , GHC == 8.8.1
 Description:	Apply a json-patch directly to a haskell datatype.  It extends the capabilities of the aeson-diff packages, and includes template haskell functions for automatically deriving the right instances.
 
 extra-source-files: .travis.yml
