@@ -1,9 +1,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE CPP #-}
 
 module Data.Aeson.Diff.Generic.PathOptics
   ( -- * type synonyms
@@ -26,6 +25,13 @@ import Data.Aeson.Diff
 import Data.Aeson.Pointer
 import Data.Functor.Compose
 import Control.Lens
+
+-- base >= 4.8: `Monoid` class is exported via `Prelude`
+-- base < 4.11: re-exports `Monoid` class & common newtype wrappers
+-- base >= 4.11: doesn't reexport `Monoid` class anymore
+#if !(MIN_VERSION_base(4,11,0))
+import Data.Monoid
+#endif
 
 type PathTraversal s a = Traversal' (Path, s) (Path, a)
 type PathLens s a = Lens' (Path, s) (Path, a)
