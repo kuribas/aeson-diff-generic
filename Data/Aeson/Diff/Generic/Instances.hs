@@ -173,7 +173,8 @@ deriving instance JsonPatch a => JsonPatch (Dual a)
 deriving instance (Typeable b, JsonPatch a) => JsonPatch (Const a b)
 deriving instance (Eq1 f, Eq1 g, FromJSON1 f, FromJSON1 g, Typeable f,
                    Typeable g, JsonPatch a, ToJSON1 f,
-                   ToJSON1 g, JsonPatch (f (g a)))
+                   ToJSON1 g, JsonPatch (f (g a)),
+                   Functor f)
                   => JsonPatch (Compose f g a)
 deriving instance (Typeable a, JsonPatch b) => JsonPatch (Tagged a b)
 
