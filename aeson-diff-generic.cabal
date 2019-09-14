@@ -1,5 +1,5 @@
 Name:		aeson-diff-generic
-Version: 	0.0.3
+Version: 	0.1.0
 Synopsis:	Apply a json-patch to any haskell datatype.
 Category: 	JSON, Web
 Copyright: 	Kristof Bastiaensen (2018)
@@ -12,8 +12,10 @@ Bug-Reports: 	https://github.com/kuribas/aeson-diff-generic/issues
 Build-type:	Simple
 Cabal-version:	>=1.8
 Tested-With:    GHC == 7.10.2
-                GHC == 8.0.2
-                GHC == 8.2.2
+              , GHC == 8.0.2
+              , GHC == 8.2.2
+              , GHC == 8.4.4
+              , GHC == 8.6.5
 Description:	Apply a json-patch directly to a haskell datatype.  It extends the capabilities of the aeson-diff packages, and includes template haskell functions for automatically deriving the right instances.
 
 extra-source-files: .travis.yml
@@ -26,9 +28,10 @@ Source-repository head
 
 Library
   Ghc-options: -Wall
+  if impl(ghc >= 8.0)
+    Ghc-options: -Wcompat
   build-depends: base >= 4.5 && <= 5,
-                 base-compat >= 0.9.1 && < 0.10,                 
-                 aeson >= 1.2.4.0 && < 1.3,
+                 aeson >= 1.2.4.0 && < 1.5,
                  aeson-diff >= 1.1.0.0 && < 1.2,
                  bytestring >=0.10 && < 0.11,
                  hashable >= 1.1.2.0,
@@ -36,25 +39,24 @@ Library
                  uuid-types >= 1.0.3 && <1.1,
                  dlist >= 0.6,
                  base >= 4.5 && < 5,
-                 base-compat >= 0.9.1 && < 0.10,
                  containers >= 0.5.8,
                  dlist >= 0.6,
                  scientific >= 0.3.4.7 && < 0.4,
                  tagged >=0.8.3 && <0.9,
-                 template-haskell >= 2.7,
+                 template-haskell >= 2.7 && <2.16,
                  text >= 1.1.1.0,
-                 th-abstraction >= 0.2.2 && < 0.3,
+                 th-abstraction >= 0.2.2 && < 0.4,
                  time >= 1.1.1.4,
                  unordered-containers >= 0.2.5.0 && < 0.3,
                  uuid-types >= 1.0.3 && <1.1,
                  vector >= 0.8,
-                 lens >= 4.16 && < 4.17
-                        
+                 lens >= 4.16 && < 4.19
 
   if !impl(ghc >= 8.0)
-    -- `Data.Semigroup` and `Control.Monad.Fail` and `Control.Monad.IO.Class` are available in base only since GHC 8.0 / base 4.9
+    -- `Data.Semigroup`, `Control.Monad.Fail` and `Control.Monad.IO.Class`
+    -- are available in base only since GHC 8.0 / base 4.9
     build-depends:
-      semigroups >= 0.18.2 && < 0.19,
+      semigroups >= 0.18.2 && < 0.20,
       transformers >= 0.2.2.0,
       transformers-compat >= 0.3,
       fail == 4.9.*
