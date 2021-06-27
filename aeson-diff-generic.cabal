@@ -31,26 +31,22 @@ Library
   if impl(ghc >= 8.0)
     Ghc-options: -Wcompat
   build-depends: base >= 4.5 && <= 5,
-                 aeson >= 1.2.4.0 && < 1.5,
+                 aeson,
                  aeson-diff >= 1.1.0.0 && < 1.2,
-                 bytestring >=0.10 && < 0.11,
-                 hashable >= 1.1.2.0,
-                 bytestring >= 0.10,
-                 uuid-types >= 1.0.3 && <1.1,
+                 bytestring,
+                 containers,
                  dlist >= 0.6,
-                 base >= 4.5 && < 5,
-                 containers >= 0.5.8,
-                 dlist >= 0.6,
-                 scientific >= 0.3.4.7 && < 0.4,
-                 tagged >=0.8.3 && <0.9,
-                 template-haskell >= 2.7 && <2.16,
-                 text >= 1.1.1.0,
-                 th-abstraction >= 0.2.2 && < 0.4,
-                 time >= 1.1.1.4,
-                 unordered-containers >= 0.2.5.0 && < 0.3,
+                 hashable,
+                 lens,
+                 scientific,
+                 tagged,
+                 template-haskell,
+                 text,
+                 th-abstraction,
+                 time,
+                 unordered-containers,
                  uuid-types >= 1.0.3 && <1.1,
-                 vector >= 0.8,
-                 lens >= 4.16 && < 4.19
+                 vector
 
   if !impl(ghc >= 8.0)
     -- `Data.Semigroup`, `Control.Monad.Fail` and `Control.Monad.IO.Class`
