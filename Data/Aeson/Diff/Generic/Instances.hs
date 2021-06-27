@@ -446,10 +446,10 @@ instance (PVector.Prim a, JsonPatch a) => FieldLens (PVector.Vector a) where
 
 getMapKey :: FromJSONKey a => T.Text -> Result (Maybe a)
 getMapKey s = case fromJSONKey of
-  FromJSONKeyCoerce _ -> pure $ Just $ unsafeCoerce s
+  FromJSONKeyCoerce {} -> pure $ Just $ unsafeCoerce s
   FromJSONKeyText fromTxt -> pure $ Just $ fromTxt  s
   FromJSONKeyTextParser parser -> Just <$> parse parser s
-  FromJSONKeyValue _ -> pure Nothing
+  FromJSONKeyValue {} -> pure Nothing
 
 getHashMapKey :: FromJSONKey a => Key -> Result a
 getHashMapKey key =
